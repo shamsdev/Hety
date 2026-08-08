@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { ChevronLeft, Terminal, GitBranch, Database as DbIcon, Columns3, Pencil, Trash2 } from 'lucide-react'
 import { useApp } from '../store'
-import { cn, ProjectIcon } from '../lib/ui'
+import { cn, ProjectIcon, StatusDot } from '../lib/ui'
 import SshPanel from './ssh/SshPanel'
 import RepoPanel from './repo/RepoPanel'
 import DbPanel from './db/DbPanel'
@@ -17,10 +17,20 @@ const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
   { id: 'board', label: 'Planning', icon: <Columns3 size={15} /> }
 ]
 
-export default function Workspace(): ReactNode {
-  const project = useApp((s) => s.data.projects.find((p) => p.id === s.selectedProjectId))
+const LIVE = '#46c08a'
+
+export default function Workspace({
+  projectId,
+  visible
+}: {
+  projectId: string
+  visible: boolean
+}): ReactNode {
+  const project = useApp((s) => s.data.projects.find((p) => p.id === projectId))
   const select = useApp((s) => s.selectProject)
   const deleteProject = useApp((s) => s.deleteProject)
+  const sshLive = useApp((s) => (s.liveSsh[projectId]?.length ?? 0) > 0)
+  const dbLive = useApp((s) => (s.liveDb[projectId]?.length ?? 0) > 0)
   const [tab, setTab] = useState<Tab>('ssh')
   const [editing, setEditing] = useState(false)
 
@@ -41,6 +51,7 @@ export default function Workspace(): ReactNode {
           <div className="flex items-center gap-2">
             <ProjectIcon icon={project.icon} size={18} className="text-ink-faint" />
             <h1 className="truncate text-[17px] font-bold">{project.name}</h1>
+            {(sshLive || dbLive) && <StatusDot color={LIVE} />}
             {project.group && (
               <span className="rounded-md bg-bg-elevated px-1.5 py-0.5 text-[10px] font-semibold text-ink-soft">
                 {project.group}
@@ -82,27 +93,31 @@ export default function Workspace(): ReactNode {
       </header>
 
       <div className="flex items-center gap-1 border-b border-line px-4">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={cn(
-              'flex items-center gap-1.5 border-b-2 px-3.5 py-2.5 text-[13px] font-semibold transition-colors',
-              tab === t.id
-                ? 'border-accent text-ink'
-                : 'border-transparent text-ink-soft hover:text-ink'
-            )}
-          >
-            {t.icon}
-            {t.label}
-          </button>
-        ))}
+        {TABS.map((t) => {
+          const live = (t.id === 'ssh' && sshLive) || (t.id === 'db' && dbLive)
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={cn(
+                'flex items-center gap-1.5 border-b-2 px-3.5 py-2.5 text-[13px] font-semibold transition-colors',
+                tab === t.id
+                  ? 'border-accent text-ink'
+                  : 'border-transparent text-ink-soft hover:text-ink'
+              )}
+            >
+              {t.icon}
+              {t.label}
+              {live && <StatusDot color={LIVE} />}
+            </button>
+          )
+        })}
       </div>
 
       {/* Panels stay mounted so SSH sessions and DB connections survive tab switches. */}
       <div className="min-h-0 flex-1">
         <div className={cn('h-full', tab === 'ssh' ? 'block' : 'hidden')}>
-          <SshPanel project={project} />
+          <SshPanel project={project} visible={visible && tab === 'ssh'} />
         </div>
         <div className={cn('h-full', tab === 'repo' ? 'block' : 'hidden')}>
           <RepoPanel project={project} />

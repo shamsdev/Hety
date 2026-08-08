@@ -12,13 +12,15 @@ import {
   Bookmark,
   FileCode2,
   Lock,
-  Unlock
+  Unlock,
+  MoreHorizontal
 } from 'lucide-react'
 import type { Project, Database, DbSchema, SchemaTable, SchemaColumn } from '@shared/types'
 import { getDatabaseKindInfo } from '@shared/databases'
 import { buildSelectAll, quoteQualified } from '@shared/sql'
 import { useApp, newId } from '../../store'
-import { cn, EmptyState, StatusDot } from '../../lib/ui'
+import { cn, EmptyState, StatusDot, colorTint, AnchorMenu } from '../../lib/ui'
+import { ResizeHandle, usePersistedSize } from '../../lib/resize'
 import DatabaseDialog from '../dialogs/DatabaseDialog'
 import DatabaseLogo from './DatabaseLogo'
 import SchemaTree from './SchemaTree'
@@ -59,9 +61,25 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
   const [gen, setGen] = useState(0)
   const [dialog, setDialog] = useState<{ database?: Database } | null>(null)
   const [savedSearch, setSavedSearch] = useState('')
+  const [menuId, setMenuId] = useState<string | null>(null)
+  const [menuAnchor, setMenuAnchor] = useState<{
+    top: number
+    bottom: number
+    left: number
+    right: number
+  } | null>(null)
+  const [railW, setRailW] = usePersistedSize('db.rail', 240, 180, 420)
+  const [schemaW, setSchemaW] = usePersistedSize('db.schema', 240, 160, 420)
+  const setLive = useApp((s) => s.setLive)
 
   const selectedDb = project.databases.find((d) => d.id === selectedDbId) ?? null
   const selectedDbInfo = selectedDb ? getDatabaseKindInfo(selectedDb.kind) : null
+
+  useEffect(() => {
+    const key = conn.id ?? `db-${project.id}`
+    setLive('db', project.id, key, conn.status === 'connected' && !!conn.id)
+    return () => setLive('db', project.id, key, false)
+  }, [conn.status, conn.id, project.id, setLive])
 
   const openConsole = (
     title: string,
@@ -171,7 +189,10 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
   return (
     <div className="flex h-full">
       {/* Rail: databases + saved queries */}
-      <div className="flex w-60 shrink-0 flex-col border-r border-line bg-bg-panel">
+      <div
+        style={{ width: railW }}
+        className="flex shrink-0 flex-col border-r border-line bg-bg-panel"
+      >
         <div className="flex items-center justify-between px-3 py-2.5">
           <span className="text-[11px] font-bold uppercase tracking-wider text-ink-faint">Databases</span>
           <button
@@ -191,28 +212,46 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
             const location = info.supportsHost
               ? `${d.host}/${d.database}`
               : d.database || `${info.name} profile`
+            const bg = colorTint(d.color)
+            const hoverBg = colorTint(d.color, 0.22)
 
             return (
               <div
                 key={d.id}
                 className={cn(
-                  'group mb-1 flex items-center gap-2 rounded-lg px-2.5 py-2',
-                  selectedDbId === d.id ? 'bg-accent-dim' : 'hover:bg-bg-hover'
+                  'group relative mb-1 rounded-lg px-2.5 py-2 transition-colors',
+                  !d.color && (selectedDbId === d.id ? 'bg-accent-dim' : 'hover:bg-bg-hover'),
+                  d.color && selectedDbId === d.id && 'ring-1 ring-accent/40'
                 )}
+                style={
+                  d.color
+                    ? {
+                        backgroundColor: selectedDbId === d.id ? hoverBg : bg,
+                        borderLeft: `3px solid ${d.color}`,
+                        paddingLeft: 7
+                      }
+                    : undefined
+                }
+                onMouseEnter={(e) => {
+                  if (hoverBg && selectedDbId !== d.id) e.currentTarget.style.backgroundColor = hoverBg
+                }}
+                onMouseLeave={(e) => {
+                  if (bg && selectedDbId !== d.id) e.currentTarget.style.backgroundColor = bg
+                }}
               >
-                <button className="flex min-w-0 flex-1 items-center gap-2" onClick={() => setSelectedDbId(d.id)}>
+                <button
+                  className="flex w-full min-w-0 items-center gap-2 pr-7 text-left"
+                  onClick={() => setSelectedDbId(d.id)}
+                >
                   <span className="relative shrink-0">
                     <DatabaseLogo kind={d.kind} size={19} />
-                    {d.color && (
-                      <span
-                        className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-bg-panel"
-                        style={{ background: d.color }}
-                      />
-                    )}
                   </span>
-                  <span className="min-w-0 flex-1 text-left">
+                  <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1">
                       <span className="truncate text-[13px] font-semibold">{d.name}</span>
+                      {selectedDbId === d.id && conn.status === 'connected' && (
+                        <StatusDot color="#46c08a" />
+                      )}
                       {d.locked && <Lock size={11} className="shrink-0 text-warn" />}
                     </span>
                     <span className="block truncate text-[11px] text-ink-faint">
@@ -221,27 +260,42 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
                     </span>
                   </span>
                 </button>
-                <div className="flex shrink-0 gap-0.5 opacity-0 group-hover:opacity-100">
-                  <button
-                    className="rounded p-1 text-ink-faint hover:bg-bg-elevated hover:text-ink"
-                    title="Edit"
-                    onClick={() => setDialog({ database: d })}
-                  >
-                    <Pencil size={12} />
-                  </button>
-                  <button
-                    className="rounded p-1 text-ink-faint hover:bg-bg-elevated hover:text-bad"
-                    title="Delete"
-                    onClick={() => {
+                <button
+                  title="Actions"
+                  className={cn(
+                    'absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-ink-faint transition-opacity hover:bg-black/10 hover:text-ink',
+                    menuId === d.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                  )}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (menuId === d.id) {
+                      setMenuId(null)
+                      setMenuAnchor(null)
+                      return
+                    }
+                    const r = e.currentTarget.getBoundingClientRect()
+                    setMenuId(d.id)
+                    setMenuAnchor({ top: r.top, bottom: r.bottom, left: r.left, right: r.right })
+                  }}
+                >
+                  <MoreHorizontal size={15} />
+                </button>
+                {menuId === d.id && menuAnchor && (
+                  <DatabaseMenu
+                    anchor={menuAnchor}
+                    onClose={() => {
+                      setMenuId(null)
+                      setMenuAnchor(null)
+                    }}
+                    onEdit={() => setDialog({ database: d })}
+                    onDelete={() => {
                       if (confirm(`Delete database "${d.name}"?`)) {
                         if (selectedDbId === d.id) setSelectedDbId(null)
                         deleteDatabase(project.id, d.id)
                       }
                     }}
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
+                  />
+                )}
               </div>
             )
           })}
@@ -293,6 +347,7 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
           </div>
         </div>
       </div>
+      <ResizeHandle axis="x" size={railW} onResize={setRailW} />
 
       {/* Main workspace */}
       <div className="flex min-w-0 flex-1 flex-col">
@@ -304,12 +359,18 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
           />
         ) : selectedDbInfo && !selectedDbInfo.supported ? (
           <>
-            <div
-              className="flex items-center gap-2 border-b border-line bg-bg-panel px-4 py-2"
-              style={selectedDb.color ? { borderTop: `2px solid ${selectedDb.color}` } : undefined}
-            >
+            <div className="flex items-center gap-2 border-b border-line bg-bg-panel px-4 py-2">
               <DatabaseLogo kind={selectedDb.kind} size={18} />
-              <span className="text-[14px] font-bold">{selectedDb.name}</span>
+              <span
+                className="rounded-md px-1.5 py-0.5 text-[14px] font-bold"
+                style={
+                  selectedDb.color
+                    ? { backgroundColor: colorTint(selectedDb.color, 0.22) }
+                    : undefined
+                }
+              >
+                {selectedDb.name}
+              </span>
               <span className="rounded bg-warn/15 px-1.5 py-0.5 text-[10px] font-bold text-warn">
                 PROFILE ONLY
               </span>
@@ -331,12 +392,18 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
           </>
         ) : (
           <>
-            <div
-              className="flex items-center gap-2 border-b border-line bg-bg-panel px-4 py-2"
-              style={selectedDb.color ? { borderTop: `2px solid ${selectedDb.color}` } : undefined}
-            >
+            <div className="flex items-center gap-2 border-b border-line bg-bg-panel px-4 py-2">
               <DatabaseLogo kind={selectedDb.kind} size={18} />
-              <span className="text-[14px] font-bold">{selectedDb.name}</span>
+              <span
+                className="rounded-md px-1.5 py-0.5 text-[14px] font-bold"
+                style={
+                  selectedDb.color
+                    ? { backgroundColor: colorTint(selectedDb.color, 0.22) }
+                    : undefined
+                }
+              >
+                {selectedDb.name}
+              </span>
               {selectedDbInfo && (
                 <span className="rounded bg-bg-elevated px-1.5 py-0.5 text-[10px] font-bold text-ink-soft">
                   {selectedDbInfo.name}
@@ -395,7 +462,10 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
             </div>
 
             <div className="flex min-h-0 flex-1">
-              <div className="w-60 shrink-0 overflow-auto border-r border-line bg-bg-panel">
+              <div
+                style={{ width: schemaW }}
+                className="shrink-0 overflow-auto border-r border-line bg-bg-panel"
+              >
                 <SchemaTree
                   dbName={selectedDb.database}
                   kind={selectedDb.kind}
@@ -403,6 +473,7 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
                   onOpenTable={openTable}
                 />
               </div>
+              <ResizeHandle axis="x" size={schemaW} onResize={setSchemaW} />
 
               <div className="flex min-w-0 flex-1 flex-col bg-bg-base">
                 {tabs.length === 0 ? (
@@ -410,30 +481,43 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
                 ) : (
                   <>
                     <div className="flex items-stretch overflow-x-auto border-b border-line bg-bg-panel">
-                      {tabs.map((t) => (
-                        <button
-                          key={t.tabId}
-                          onClick={() => setActive(t.tabId)}
-                          className={cn(
-                            'group flex shrink-0 items-center gap-2 border-r border-t-2 border-line px-3.5 py-2 text-[13px]',
-                            active === t.tabId
-                              ? 'border-t-accent bg-bg-base text-ink'
-                              : 'border-t-transparent text-ink-soft hover:bg-bg-hover'
-                          )}
-                        >
-                          <FileCode2 size={12} />
-                          <span className="max-w-[140px] truncate">{t.title}</span>
-                          <span
-                            className="rounded p-0.5 opacity-0 hover:bg-bg-hover hover:text-bad group-hover:opacity-100"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              closeTab(t.tabId)
-                            }}
+                      {tabs.map((t) => {
+                        const color = selectedDb.color
+                        return (
+                          <button
+                            key={t.tabId}
+                            onClick={() => setActive(t.tabId)}
+                            className={cn(
+                              'group flex shrink-0 items-center gap-2 border-r border-t-2 border-line px-3.5 py-2 text-[13px]',
+                              active === t.tabId
+                                ? 'border-t-accent bg-bg-base text-ink'
+                                : 'border-t-transparent text-ink-soft hover:bg-bg-hover'
+                            )}
                           >
-                            <X size={12} />
-                          </span>
-                        </button>
-                      ))}
+                            <FileCode2 size={12} style={color ? { color } : undefined} />
+                            <span
+                              className="max-w-[140px] truncate rounded px-1.5 py-0.5"
+                              style={
+                                color
+                                  ? { backgroundColor: colorTint(color, active === t.tabId ? 0.22 : 0.14) }
+                                  : undefined
+                              }
+                            >
+                              {t.title}
+                            </span>
+                            {conn.status === 'connected' && <StatusDot color="#46c08a" />}
+                            <span
+                              className="rounded p-0.5 opacity-0 hover:bg-bg-hover hover:text-bad group-hover:opacity-100"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                closeTab(t.tabId)
+                              }}
+                            >
+                              <X size={12} />
+                            </span>
+                          </button>
+                        )
+                      })}
                     </div>
                     <div className="relative min-h-0 flex-1">
                       {tabs.map((t) => (
@@ -489,5 +573,48 @@ function ToolBtn({
     >
       {children}
     </button>
+  )
+}
+
+function DatabaseMenu({
+  anchor,
+  onClose,
+  onEdit,
+  onDelete
+}: {
+  anchor: { top: number; bottom: number; left: number; right: number }
+  onClose: () => void
+  onEdit: () => void
+  onDelete: () => void
+}): ReactNode {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return (
+    <AnchorMenu anchor={anchor} onClose={onClose}>
+      <button
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-ink hover:bg-bg-hover"
+        onClick={() => {
+          onEdit()
+          onClose()
+        }}
+      >
+        <Pencil size={13} /> Edit
+      </button>
+      <button
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-bad hover:bg-bg-hover"
+        onClick={() => {
+          onDelete()
+          onClose()
+        }}
+      >
+        <Trash2 size={13} /> Delete
+      </button>
+    </AnchorMenu>
   )
 }

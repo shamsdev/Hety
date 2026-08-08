@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import { RotateCw } from 'lucide-react'
 import type { Server } from '@shared/types'
 import { StatusDot } from '../../lib/ui'
+import { useApp } from '../../store'
 
 type Status = 'connecting' | 'connected' | 'closed' | 'error'
 
@@ -17,11 +18,16 @@ const STATUS_COLOR: Record<Status, string> = {
 
 export default function TerminalView({
   server,
+  projectId,
+  liveKey,
   active
 }: {
   server: Server
+  projectId: string
+  liveKey: string
   active: boolean
 }): ReactNode {
+  const setLive = useApp((s) => s.setLive)
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -29,6 +35,11 @@ export default function TerminalView({
   const [status, setStatus] = useState<Status>('connecting')
   const [message, setMessage] = useState('')
   const [generation, setGeneration] = useState(0)
+
+  useEffect(() => {
+    setLive('ssh', projectId, liveKey, status === 'connected')
+    return () => setLive('ssh', projectId, liveKey, false)
+  }, [status, projectId, liveKey, setLive])
 
   useEffect(() => {
     if (!hostRef.current) return

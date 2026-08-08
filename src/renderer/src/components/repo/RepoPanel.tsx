@@ -46,6 +46,7 @@ import type {
 import { useApp, newId } from '../../store'
 import { basename } from '../../lib/projects'
 import { Button, Spinner, Modal, Input, Field, cn } from '../../lib/ui'
+import { ResizeHandle, usePersistedSize } from '../../lib/resize'
 import { toast } from '../../lib/toast'
 import DiffView from './DiffView'
 
@@ -250,6 +251,7 @@ function RepoView({ path, onPickFolder }: { path: string; onPickFolder: () => vo
     allowEmpty?: boolean
     onSubmit: (v: string) => void
   } | null>(null)
+  const [railW, setRailW] = usePersistedSize('repo.rail', 230, 160, 420)
 
   const refresh = useCallback(async () => {
     if (!path) return
@@ -504,7 +506,10 @@ function RepoView({ path, onPickFolder }: { path: string; onPickFolder: () => vo
 
       <div className="flex min-h-0 flex-1">
         {/* Sidebar */}
-        <aside className="flex w-[230px] shrink-0 flex-col border-r border-line bg-bg-panel">
+        <aside
+          style={{ width: railW }}
+          className="flex shrink-0 flex-col border-r border-line bg-bg-panel"
+        >
           <div className="p-2">
             <NavItem
               icon={<FileDiff size={14} />}
@@ -557,6 +562,7 @@ function RepoView({ path, onPickFolder }: { path: string; onPickFolder: () => vo
             />
           </div>
         </aside>
+        <ResizeHandle axis="x" size={railW} onResize={setRailW} />
 
         {/* Main */}
         <div className="min-w-0 flex-1">
@@ -1011,6 +1017,7 @@ function LocalChangesView({
   const [diff, setDiff] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+  const [listW, setListW] = usePersistedSize('repo.changes', 340, 220, 560)
 
   const unstaged = status?.unstaged ?? []
   const staged = status?.staged ?? []
@@ -1129,7 +1136,10 @@ function LocalChangesView({
   return (
     <div className="flex h-full">
       {/* lists + commit box */}
-      <div className="flex w-[340px] shrink-0 flex-col border-r border-line">
+      <div
+        style={{ width: listW }}
+        className="flex shrink-0 flex-col border-r border-line"
+      >
         <div className="min-h-0 flex-1 overflow-y-auto">
           <ChangeList
             title="Unstaged"
@@ -1192,6 +1202,7 @@ function LocalChangesView({
           </div>
         </div>
       </div>
+      <ResizeHandle axis="x" size={listW} onResize={setListW} />
 
       {/* diff */}
       <div className="flex min-w-0 flex-1 flex-col">

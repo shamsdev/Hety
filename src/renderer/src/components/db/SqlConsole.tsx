@@ -8,6 +8,7 @@ import { Play, Save } from 'lucide-react'
 import type { DbSchema, QueryResult, SchemaColumn } from '@shared/types'
 import ResultsGrid from './ResultsGrid'
 import { Modal, Button, Input } from '../../lib/ui'
+import { ResizeHandle, usePersistedSize } from '../../lib/resize'
 
 export type SortState = { column: string; dir: 'asc' | 'desc' } | null
 
@@ -76,6 +77,7 @@ export default function SqlConsole({
   const [sort, setSort] = useState<SortState>(null)
   const [saveOpen, setSaveOpen] = useState(false)
   const [saveName, setSaveName] = useState('')
+  const [editorH, setEditorH] = usePersistedSize('sql.editor', 280, 100, 900)
 
   const execute = async (stmt: string): Promise<void> => {
     if (!connRef.current) return
@@ -203,7 +205,12 @@ export default function SqlConsole({
         </button>
         {!connected && <span className="text-[11px] text-ink-faint">Not connected</span>}
       </div>
-      <div ref={hostRef} className="min-h-0 basis-[42%] overflow-hidden border-b border-line" />
+      <div
+        ref={hostRef}
+        style={{ height: editorH }}
+        className="min-h-0 shrink-0 overflow-hidden border-b border-line"
+      />
+      <ResizeHandle axis="y" size={editorH} onResize={setEditorH} />
       <div className="min-h-0 flex-1">
         <ResultsGrid
           result={result}

@@ -220,6 +220,56 @@ export function StatusDot({ color }: { color: string }): ReactNode {
   return <span className="inline-block h-2 w-2 rounded-full" style={{ background: color }} />
 }
 
+/** Soft rgba tint from a #RRGGBB accent (server/database color). */
+export function colorTint(hex: string | undefined, alpha = 0.14): string | undefined {
+  if (!hex) return undefined
+  const h = hex.replace('#', '')
+  if (h.length !== 6) return undefined
+  const r = parseInt(h.slice(0, 2), 16)
+  const g = parseInt(h.slice(2, 4), 16)
+  const b = parseInt(h.slice(4, 6), 16)
+  if ([r, g, b].some((n) => Number.isNaN(n))) return undefined
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+/** Fixed popover anchored under (or above) a trigger — escapes overflow clipping. */
+export function AnchorMenu({
+  anchor,
+  onClose,
+  children,
+  width = 148
+}: {
+  anchor: { top: number; bottom: number; left: number; right: number }
+  onClose: () => void
+  children: ReactNode
+  width?: number
+}): ReactNode {
+  const spaceBelow = typeof window !== 'undefined' ? window.innerHeight - anchor.bottom : 200
+  const openUp = spaceBelow < 120
+  const left = Math.min(
+    Math.max(8, anchor.right - width),
+    typeof window !== 'undefined' ? window.innerWidth - width - 8 : anchor.right - width
+  )
+  const top = openUp ? undefined : anchor.bottom + 4
+  const bottom = openUp
+    ? typeof window !== 'undefined'
+      ? window.innerHeight - anchor.top + 4
+      : undefined
+    : undefined
+
+  return (
+    <>
+      <div className="fixed inset-0 z-[90]" onClick={onClose} />
+      <div
+        className="fixed z-[100] overflow-hidden rounded-lg border border-line bg-bg-panel py-1 shadow-xl"
+        style={{ top, bottom, left, width }}
+      >
+        {children}
+      </div>
+    </>
+  )
+}
+
 export const COLOR_SWATCHES = [
   '#e0625e',
   '#e0883c',

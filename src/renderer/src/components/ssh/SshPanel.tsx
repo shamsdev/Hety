@@ -1,8 +1,17 @@
-import { useState, type ReactNode } from 'react'
-import { Plus, Play, Pencil, Trash2, X, Terminal as TerminalIcon } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
+import {
+  Plus,
+  Play,
+  Pencil,
+  Trash2,
+  X,
+  Terminal as TerminalIcon,
+  MoreHorizontal
+} from 'lucide-react'
 import type { Project, Server } from '@shared/types'
-import { useApp } from '../../store'
-import { cn, EmptyState } from '../../lib/ui'
+import { useApp, EMPTY_LIVE } from '../../store'
+import { cn, EmptyState, StatusDot, colorTint, AnchorMenu } from '../../lib/ui'
+import { ResizeHandle, usePersistedSize } from '../../lib/resize'
 import ServerDialog from '../dialogs/ServerDialog'
 import TerminalView from './TerminalView'
 
@@ -11,11 +20,28 @@ interface Tab {
   server: Server
 }
 
-export default function SshPanel({ project }: { project: Project }): ReactNode {
+const LIVE = '#46c08a'
+
+export default function SshPanel({
+  project,
+  visible = true
+}: {
+  project: Project
+  visible?: boolean
+}): ReactNode {
   const deleteServer = useApp((s) => s.deleteServer)
+  const liveKeys = useApp((s) => s.liveSsh[project.id] ?? EMPTY_LIVE)
   const [dialog, setDialog] = useState<{ server?: Server } | null>(null)
   const [tabs, setTabs] = useState<Tab[]>([])
   const [active, setActive] = useState<string | null>(null)
+  const [menuId, setMenuId] = useState<string | null>(null)
+  const [menuAnchor, setMenuAnchor] = useState<{
+    top: number
+    bottom: number
+    left: number
+    right: number
+  } | null>(null)
+  const [railW, setRailW] = usePersistedSize('ssh.rail', 224, 160, 420)
 
   const openSession = (server: Server): void => {
     const tabId = crypto.randomUUID()
@@ -31,10 +57,16 @@ export default function SshPanel({ project }: { project: Project }): ReactNode {
     })
   }
 
+  const serverLive = (serverId: string): boolean =>
+    tabs.some((t) => t.server.id === serverId && liveKeys.includes(t.tabId))
+
   return (
     <div className="flex h-full">
       {/* Server rail */}
-      <div className="flex w-56 shrink-0 flex-col border-r border-line bg-bg-panel">
+      <div
+        style={{ width: railW }}
+        className="flex shrink-0 flex-col border-r border-line bg-bg-panel"
+      >
         <div className="flex items-center justify-between px-3 py-2.5">
           <span className="text-[11px] font-bold uppercase tracking-wider text-ink-faint">Servers</span>
           <button
@@ -51,44 +83,81 @@ export default function SshPanel({ project }: { project: Project }): ReactNode {
               No servers. Add one to connect.
             </p>
           )}
-          {project.servers.map((s) => (
-            <div
-              key={s.id}
-              className="group mb-1 rounded-lg px-2.5 py-2 hover:bg-bg-hover"
-              style={s.color ? { borderLeft: `3px solid ${s.color}`, paddingLeft: 7 } : undefined}
-            >
-              <div className="flex items-center gap-2">
-                <button className="min-w-0 flex-1 text-left" onDoubleClick={() => openSession(s)}>
+          {project.servers.map((s) => {
+            const bg = colorTint(s.color)
+            const hoverBg = colorTint(s.color, 0.22) ?? undefined
+            return (
+              <div
+                key={s.id}
+                className={cn(
+                  'group relative mb-1 rounded-lg px-2.5 py-2 transition-colors',
+                  !s.color && 'hover:bg-bg-hover'
+                )}
+                style={
+                  s.color
+                    ? {
+                        backgroundColor: bg,
+                        borderLeft: `3px solid ${s.color}`,
+                        paddingLeft: 7
+                      }
+                    : undefined
+                }
+                onMouseEnter={(e) => {
+                  if (hoverBg) e.currentTarget.style.backgroundColor = hoverBg
+                }}
+                onMouseLeave={(e) => {
+                  if (bg) e.currentTarget.style.backgroundColor = bg
+                }}
+              >
+                <button className="block w-full min-w-0 pr-7 text-left" onDoubleClick={() => openSession(s)}>
                   <div className="flex items-center gap-1.5">
-                    {s.color && (
-                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: s.color }} />
-                    )}
                     <span className="truncate text-[13px] font-semibold">{s.name}</span>
+                    {serverLive(s.id) && <StatusDot color={LIVE} />}
                   </div>
                   <div className="truncate text-[11px] text-ink-faint">
                     {s.username}@{s.host}:{s.port}
                   </div>
                 </button>
-                <div className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100">
-                  <IconBtn title="Connect" onClick={() => openSession(s)}>
-                    <Play size={13} />
-                  </IconBtn>
-                  <IconBtn title="Edit" onClick={() => setDialog({ server: s })}>
-                    <Pencil size={13} />
-                  </IconBtn>
-                  <IconBtn
-                    title="Delete"
-                    danger
-                    onClick={() => confirm(`Delete server "${s.name}"?`) && deleteServer(project.id, s.id)}
-                  >
-                    <Trash2 size={13} />
-                  </IconBtn>
-                </div>
+                <button
+                  title="Actions"
+                  className={cn(
+                    'absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-ink-faint transition-opacity hover:bg-black/10 hover:text-ink',
+                    menuId === s.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                  )}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (menuId === s.id) {
+                      setMenuId(null)
+                      setMenuAnchor(null)
+                      return
+                    }
+                    const r = e.currentTarget.getBoundingClientRect()
+                    setMenuId(s.id)
+                    setMenuAnchor({ top: r.top, bottom: r.bottom, left: r.left, right: r.right })
+                  }}
+                >
+                  <MoreHorizontal size={15} />
+                </button>
+                {menuId === s.id && menuAnchor && (
+                  <ServerMenu
+                    anchor={menuAnchor}
+                    onClose={() => {
+                      setMenuId(null)
+                      setMenuAnchor(null)
+                    }}
+                    onConnect={() => openSession(s)}
+                    onEdit={() => setDialog({ server: s })}
+                    onDelete={() => {
+                      if (confirm(`Delete server "${s.name}"?`)) deleteServer(project.id, s.id)
+                    }}
+                  />
+                )}
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
+      <ResizeHandle axis="x" size={railW} onResize={setRailW} />
 
       {/* Terminal tabs */}
       <div className="flex min-w-0 flex-1 flex-col bg-bg-base">
@@ -107,14 +176,32 @@ export default function SshPanel({ project }: { project: Project }): ReactNode {
                     key={t.tabId}
                     onClick={() => setActive(t.tabId)}
                     className={cn(
-                      'group flex shrink-0 items-center gap-2 border-r border-line px-3.5 py-2 text-[13px]',
+                      'group flex shrink-0 items-center gap-2 border-r border-t-2 border-line px-3.5 py-2 text-[13px]',
                       active === t.tabId
-                        ? 'border-t-2 border-t-accent bg-bg-base text-ink'
-                        : 'border-t-2 border-t-transparent text-ink-soft hover:bg-bg-hover'
+                        ? 'border-t-accent bg-bg-base text-ink'
+                        : 'border-t-transparent text-ink-soft hover:bg-bg-hover'
                     )}
                   >
-                    <TerminalIcon size={13} style={t.server.color ? { color: t.server.color } : undefined} />
-                    <span className="max-w-[140px] truncate">{t.server.name}</span>
+                    <TerminalIcon
+                      size={13}
+                      style={t.server.color ? { color: t.server.color } : undefined}
+                    />
+                    <span
+                      className="max-w-[140px] truncate rounded px-1.5 py-0.5"
+                      style={
+                        t.server.color
+                          ? {
+                              backgroundColor: colorTint(
+                                t.server.color,
+                                active === t.tabId ? 0.22 : 0.14
+                              )
+                            }
+                          : undefined
+                      }
+                    >
+                      {t.server.name}
+                    </span>
+                    {liveKeys.includes(t.tabId) && <StatusDot color={LIVE} />}
                     <span
                       className="rounded p-0.5 opacity-0 hover:bg-bg-hover hover:text-bad group-hover:opacity-100"
                       onClick={(e) => {
@@ -131,7 +218,12 @@ export default function SshPanel({ project }: { project: Project }): ReactNode {
             <div className="relative min-h-0 flex-1">
               {tabs.map((t) => (
                 <div key={t.tabId} className={cn('absolute inset-0', active === t.tabId ? 'block' : 'hidden')}>
-                  <TerminalView server={t.server} active={active === t.tabId} />
+                  <TerminalView
+                    server={t.server}
+                    projectId={project.id}
+                    liveKey={t.tabId}
+                    active={visible && active === t.tabId}
+                  />
                 </div>
               ))}
             </div>
@@ -146,27 +238,79 @@ export default function SshPanel({ project }: { project: Project }): ReactNode {
   )
 }
 
-function IconBtn({
-  children,
+function ServerMenu({
+  anchor,
+  onClose,
+  onConnect,
+  onEdit,
+  onDelete
+}: {
+  anchor: { top: number; bottom: number; left: number; right: number }
+  onClose: () => void
+  onConnect: () => void
+  onEdit: () => void
+  onDelete: () => void
+}): ReactNode {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return (
+    <AnchorMenu anchor={anchor} onClose={onClose}>
+      <MenuItem
+        icon={<Play size={13} />}
+        label="Connect"
+        onClick={() => {
+          onConnect()
+          onClose()
+        }}
+      />
+      <MenuItem
+        icon={<Pencil size={13} />}
+        label="Edit"
+        onClick={() => {
+          onEdit()
+          onClose()
+        }}
+      />
+      <MenuItem
+        icon={<Trash2 size={13} />}
+        label="Delete"
+        danger
+        onClick={() => {
+          onDelete()
+          onClose()
+        }}
+      />
+    </AnchorMenu>
+  )
+}
+
+function MenuItem({
+  icon,
+  label,
   onClick,
-  title,
   danger
 }: {
-  children: ReactNode
+  icon: ReactNode
+  label: string
   onClick: () => void
-  title: string
   danger?: boolean
 }): ReactNode {
   return (
     <button
-      title={title}
-      onClick={onClick}
       className={cn(
-        'flex h-6 w-6 items-center justify-center rounded-md text-ink-faint hover:bg-bg-elevated',
-        danger ? 'hover:text-bad' : 'hover:text-ink'
+        'flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-bg-hover',
+        danger ? 'text-bad' : 'text-ink'
       )}
+      onClick={onClick}
     >
-      {children}
+      {icon}
+      {label}
     </button>
   )
 }

@@ -1,8 +1,8 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Plus, Search, Clock, Server, Database as DbIcon, GitBranch, Pencil, Trash2 } from 'lucide-react'
-import { useApp } from '../store'
+import { useApp, projectHasLive } from '../store'
 import { filterProjects, groupProjects, recentProjects, topTags } from '../lib/projects'
-import { Button, Chip, cn, ProjectIcon } from '../lib/ui'
+import { Button, Chip, cn, ProjectIcon, StatusDot } from '../lib/ui'
 import ProjectDialog from './dialogs/ProjectDialog'
 import type { Project } from '@shared/types'
 
@@ -10,6 +10,8 @@ export default function ProjectGallery(): ReactNode {
   const projects = useApp((s) => s.data.projects)
   const select = useApp((s) => s.selectProject)
   const deleteProject = useApp((s) => s.deleteProject)
+  const liveSsh = useApp((s) => s.liveSsh)
+  const liveDb = useApp((s) => s.liveDb)
 
   const [query, setQuery] = useState('')
   const [tag, setTag] = useState<string | null>(null)
@@ -79,6 +81,7 @@ export default function ProjectGallery(): ReactNode {
                 <ProjectCard
                   key={p.id}
                   project={p}
+                  live={projectHasLive(liveSsh, liveDb, p.id)}
                   onOpen={() => select(p.id)}
                   onEdit={() => setEditing(p)}
                   onDelete={() => deleteProject(p.id)}
@@ -101,6 +104,7 @@ export default function ProjectGallery(): ReactNode {
                 <ProjectCard
                   key={p.id}
                   project={p}
+                  live={projectHasLive(liveSsh, liveDb, p.id)}
                   onOpen={() => select(p.id)}
                   onEdit={() => setEditing(p)}
                   onDelete={() => deleteProject(p.id)}
@@ -119,11 +123,13 @@ export default function ProjectGallery(): ReactNode {
 
 function ProjectCard({
   project,
+  live,
   onOpen,
   onEdit,
   onDelete
 }: {
   project: Project
+  live: boolean
   onOpen: () => void
   onEdit: () => void
   onDelete: () => void
@@ -163,6 +169,7 @@ function ProjectCard({
           <ProjectIcon icon={project.icon} size={18} className="text-ink-faint" />
         </span>
         <span className="truncate text-[15px] font-bold">{project.name}</span>
+        {live && <StatusDot color="#46c08a" />}
       </div>
       <div className="mb-3 line-clamp-2 h-8 text-xs text-ink-faint">
         {project.description || 'No description'}
