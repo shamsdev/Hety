@@ -84,17 +84,19 @@ export const useApp = create<AppState>((set, get) => ({
 
   selectProject: (id) => {
     if (id) {
-      const data = {
-        ...get().data,
-        projects: mapProjects(get().data, id, (p) => ({ ...p, lastOpenedAt: Date.now() }))
-      }
       const open = get().openProjectIds
-      set({
-        data,
-        selectedProjectId: id,
-        openProjectIds: open.includes(id) ? open : [...open, id]
-      })
-      persist(data)
+      // Only bump lastOpenedAt when first opening a project this session —
+      // switching back to an already-open project must not reshuffle Recents.
+      if (!open.includes(id)) {
+        const data = {
+          ...get().data,
+          projects: mapProjects(get().data, id, (p) => ({ ...p, lastOpenedAt: Date.now() }))
+        }
+        set({ data, selectedProjectId: id, openProjectIds: [...open, id] })
+        persist(data)
+      } else {
+        set({ selectedProjectId: id })
+      }
     } else {
       set({ selectedProjectId: null })
     }
