@@ -7,10 +7,17 @@ export function newId(): string {
   return crypto.randomUUID()
 }
 
+type LiveKind = 'ssh' | 'db'
+
 interface AppState {
   ready: boolean
   data: AppData
   selectedProjectId: string | null
+  /** Projects whose Workspace stays mounted so SSH/DB sessions survive switching. */
+  openProjectIds: string[]
+  /** Live connection keys keyed by project id (ssh sessions / db connections). */
+  liveSsh: Record<string, string[]>
+  liveDb: Record<string, string[]>
   load: (data: AppData) => void
   selectProject: (id: string | null) => void
   upsertProject: (p: Project) => void
@@ -21,6 +28,7 @@ interface AppState {
   deleteDatabase: (projectId: string, id: string) => void
   addSavedQuery: (q: SavedQuery) => void
   deleteSavedQuery: (id: string) => void
+  setLive: (kind: LiveKind, projectId: string, key: string, live: boolean) => void
 }
 
 function persist(data: AppData): void {
@@ -35,10 +43,42 @@ function mapProjects(
   return data.projects.map((p) => (p.id === projectId ? fn(p) : p))
 }
 
+function patchLive(
+  map: Record<string, string[]>,
+  projectId: string,
+  key: string,
+  live: boolean
+): Record<string, string[]> {
+  const cur = map[projectId] ?? []
+  const has = cur.includes(key)
+  if (live && has) return map
+  if (!live && !has) return map
+  const next = live ? [...cur, key] : cur.filter((k) => k !== key)
+  if (next.length === 0) {
+    const { [projectId]: _, ...rest } = map
+    return rest
+  }
+  return { ...map, [projectId]: next }
+}
+
+export function projectHasLive(
+  liveSsh: Record<string, string[]>,
+  liveDb: Record<string, string[]>,
+  projectId: string
+): boolean {
+  return (liveSsh[projectId]?.length ?? 0) > 0 || (liveDb[projectId]?.length ?? 0) > 0
+}
+
+/** Stable empty list for zustand selectors — never return a fresh `[]` from getSnapshot. */
+export const EMPTY_LIVE: string[] = []
+
 export const useApp = create<AppState>((set, get) => ({
   ready: false,
   data: emptyAppData(),
   selectedProjectId: null,
+  openProjectIds: [],
+  liveSsh: {},
+  liveDb: {},
 
   load: (data) => set({ data: normalizeAppData(data), ready: true }),
 
@@ -48,7 +88,12 @@ export const useApp = create<AppState>((set, get) => ({
         ...get().data,
         projects: mapProjects(get().data, id, (p) => ({ ...p, lastOpenedAt: Date.now() }))
       }
-      set({ data, selectedProjectId: id })
+      const open = get().openProjectIds
+      set({
+        data,
+        selectedProjectId: id,
+        openProjectIds: open.includes(id) ? open : [...open, id]
+      })
       persist(data)
     } else {
       set({ selectedProjectId: null })
@@ -73,7 +118,15 @@ export const useApp = create<AppState>((set, get) => ({
       projects: cur.projects.filter((p) => p.id !== id),
       savedQueries: cur.savedQueries.filter((q) => q.projectId !== id)
     }
-    set({ data, selectedProjectId: get().selectedProjectId === id ? null : get().selectedProjectId })
+    const { [id]: _s, ...liveSsh } = get().liveSsh
+    const { [id]: _d, ...liveDb } = get().liveDb
+    set({
+      data,
+      selectedProjectId: get().selectedProjectId === id ? null : get().selectedProjectId,
+      openProjectIds: get().openProjectIds.filter((x) => x !== id),
+      liveSsh,
+      liveDb
+    })
     persist(data)
   },
 
@@ -145,5 +198,13 @@ export const useApp = create<AppState>((set, get) => ({
     }
     set({ data })
     persist(data)
+  },
+
+  setLive: (kind, projectId, key, live) => {
+    if (kind === 'ssh') {
+      set({ liveSsh: patchLive(get().liveSsh, projectId, key, live) })
+    } else {
+      set({ liveDb: patchLive(get().liveDb, projectId, key, live) })
+    }
   }
 }))
