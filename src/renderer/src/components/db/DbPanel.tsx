@@ -81,6 +81,16 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
     return () => setLive('db', project.id, key, false)
   }, [conn.status, conn.id, project.id, setLive])
 
+  // Server-side idle disconnects (network drop, tunnel death, etc.).
+  useEffect(() => {
+    return window.api.db.onStatus((p) => {
+      setConn((c) => {
+        if (!c.id || c.id !== p.id) return c
+        return { id: null, status: 'error', error: p.message || 'Connection lost' }
+      })
+    })
+  }, [])
+
   const openConsole = (
     title: string,
     initialSql = '',
