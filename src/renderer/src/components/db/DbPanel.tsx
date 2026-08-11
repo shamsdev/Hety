@@ -15,7 +15,7 @@ import {
   Unlock,
   MoreHorizontal
 } from 'lucide-react'
-import type { Project, Database, DbSchema, SchemaTable, SchemaColumn } from '@shared/types'
+import type { Project, Database, DbSchema, SchemaTable } from '@shared/types'
 import { getDatabaseKindInfo } from '@shared/databases'
 import { buildSelectAll, quoteQualified } from '@shared/sql'
 import { useApp, newId } from '../../store'
@@ -24,7 +24,7 @@ import { ResizeHandle, usePersistedSize } from '../../lib/resize'
 import DatabaseDialog from '../dialogs/DatabaseDialog'
 import DatabaseLogo from './DatabaseLogo'
 import SchemaTree from './SchemaTree'
-import SqlConsole from './SqlConsole'
+import SqlConsole, { type EditTable } from './SqlConsole'
 
 interface Conn {
   id: string | null
@@ -36,7 +36,7 @@ interface ConsoleTab {
   title: string
   initialSql?: string
   autorun?: boolean
-  editTable?: { table: string; columns: SchemaColumn[] }
+  editTable?: EditTable
 }
 
 const STATUS_COLOR: Record<Conn['status'], string> = {
@@ -85,7 +85,7 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
     title: string,
     initialSql = '',
     autorun = false,
-    editTable?: { table: string; columns: SchemaColumn[] }
+    editTable?: EditTable
   ): void => {
     const tabId = newId()
     setTabs((t) => [...t, { tabId, title, initialSql, autorun, editTable }])
@@ -165,7 +165,11 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
     const kind = selectedDb?.kind
     const qualified = quoteQualified(kind ?? 'postgresql', schemaName, table.name)
     const sql = buildSelectAll(kind ?? 'postgresql', schemaName, table.name)
-    openConsole(table.name, sql, true, { table: qualified, columns: table.columns })
+    openConsole(table.name, sql, true, {
+      table: qualified,
+      name: table.name,
+      columns: table.columns
+    })
   }
 
   const onSave = (name: string, sql: string): void => {
@@ -528,6 +532,8 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
                           <SqlConsole
                             connectionId={conn.id}
                             connected={conn.status === 'connected'}
+                            kind={selectedDb.kind}
+                            dbName={selectedDb.database}
                             schema={schema}
                             initialSql={t.initialSql}
                             autorun={t.autorun}

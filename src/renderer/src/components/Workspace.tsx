@@ -1,17 +1,28 @@
 import { useState, type ReactNode } from 'react'
-import { ChevronLeft, Terminal, GitBranch, Database as DbIcon, Columns3, Pencil, Trash2 } from 'lucide-react'
+import {
+  ChevronLeft,
+  Terminal,
+  GitBranch,
+  Database as DbIcon,
+  Columns3,
+  Pencil,
+  Trash2,
+  ServerCog
+} from 'lucide-react'
 import { useApp } from '../store'
 import { cn, ProjectIcon, StatusDot } from '../lib/ui'
 import SshPanel from './ssh/SshPanel'
+import OpsPanel from './ops/OpsPanel'
 import RepoPanel from './repo/RepoPanel'
 import DbPanel from './db/DbPanel'
 import BoardPanel from './board/BoardPanel'
 import ProjectDialog from './dialogs/ProjectDialog'
 
-type Tab = 'ssh' | 'repo' | 'db' | 'board'
+type Tab = 'ssh' | 'ops' | 'repo' | 'db' | 'board'
 
 const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
   { id: 'ssh', label: 'SSH', icon: <Terminal size={15} /> },
+  { id: 'ops', label: 'Remote', icon: <ServerCog size={15} /> },
   { id: 'repo', label: 'Repository', icon: <GitBranch size={15} /> },
   { id: 'db', label: 'Database', icon: <DbIcon size={15} /> },
   { id: 'board', label: 'Planning', icon: <Columns3 size={15} /> }
@@ -118,6 +129,9 @@ export default function Workspace({
       <div className="min-h-0 flex-1">
         <div className={cn('h-full', tab === 'ssh' ? 'block' : 'hidden')}>
           <SshPanel project={project} visible={visible && tab === 'ssh'} />
+        </div>
+        <div className={cn('h-full', tab === 'ops' ? 'block' : 'hidden')}>
+          <OpsPanel project={project} visible={visible && tab === 'ops'} />
         </div>
         <div className={cn('h-full', tab === 'repo' ? 'block' : 'hidden')}>
           <RepoPanel project={project} />

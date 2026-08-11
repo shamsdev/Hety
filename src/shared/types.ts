@@ -189,6 +189,222 @@ export interface GitStatus {
   error?: string
 }
 
+// ---- Remote server ops (Remote tab) ----
+
+/** Identity of a connected remote host plus what privileges we have on it. */
+export interface RemoteHostInfo {
+  hostname: string
+  os: string
+  kernel: string
+  user: string
+  home: string
+  isRoot: boolean
+  /** true when `sudo` exists and we can elevate (passwordless or with the saved password). */
+  canSudo: boolean
+  shell: string
+}
+
+export type RemoteEntryType = 'dir' | 'file' | 'link' | 'other'
+
+export interface RemoteEntry {
+  name: string
+  path: string
+  type: RemoteEntryType
+  size: number
+  /** modification time in ms since epoch. */
+  mtime: number
+  /** permission bits, e.g. 0o755. */
+  mode: number
+  /** `rwxr-xr-x` rendering of `mode`. */
+  modeText: string
+  owner: string
+  group: string
+  /** for symlinks: whether the target resolves to a directory. */
+  linkDir?: boolean
+}
+
+export interface RemoteListing {
+  path: string
+  entries: RemoteEntry[]
+  /** true when the listing had to be read with elevated privileges. */
+  elevated?: boolean
+}
+
+export interface RemoteFile {
+  path: string
+  content: string
+  size: number
+  /** true when only the first slice of a large file was read. */
+  truncated: boolean
+  /** true when the content looks binary (rendered read-only). */
+  binary: boolean
+}
+
+export interface RemoteExec {
+  code: number
+  stdout: string
+  stderr: string
+}
+
+export type TransferKind = 'upload' | 'download'
+export interface TransferProgress {
+  serverId: string
+  kind: TransferKind
+  name: string
+  transferred: number
+  total: number
+  /** 1-based position in a multi-file transfer. */
+  index: number
+  count: number
+  done: boolean
+  error?: string
+}
+
+// ---- Monitoring ----
+export interface CpuCore {
+  id: string
+  usage: number
+}
+export interface DiskUsage {
+  filesystem: string
+  type: string
+  mount: string
+  size: number
+  used: number
+  available: number
+  usePercent: number
+}
+export interface ProcessInfo {
+  pid: number
+  user: string
+  cpu: number
+  mem: number
+  rss: number
+  name: string
+  command: string
+}
+export interface NetInterface {
+  name: string
+  rxBytes: number
+  txBytes: number
+  /** bytes/second since the previous sample (0 on the first one). */
+  rxRate: number
+  txRate: number
+}
+export interface RemoteMetrics {
+  time: number
+  hostname: string
+  os: string
+  kernel: string
+  uptimeSeconds: number
+  load: [number, number, number]
+  cpu: { usage: number; count: number; cores: CpuCore[]; temperature?: number }
+  memory: { total: number; used: number; available: number; cached: number; buffers: number }
+  swap: { total: number; used: number }
+  disks: DiskUsage[]
+  net: NetInterface[]
+  processes: ProcessInfo[]
+  processCount: number
+  sessions: { user: string; tty: string; from: string; since: string }[]
+}
+
+// ---- Security ----
+export interface UfwRule {
+  num: number
+  to: string
+  action: string
+  from: string
+  comment?: string
+}
+export interface UfwStatus {
+  installed: boolean
+  active: boolean
+  /** e.g. `deny (incoming), allow (outgoing)`. */
+  defaults: string
+  logging: string
+  rules: UfwRule[]
+}
+export interface ListeningPort {
+  proto: string
+  address: string
+  port: string
+  process: string
+  pid?: number
+}
+export interface Fail2banJail {
+  name: string
+  currentlyFailed: number
+  totalFailed: number
+  banned: string[]
+  totalBanned: number
+}
+export interface AuditItem {
+  key: string
+  value: string
+  /** true = hardened, false = risky, null = informational. */
+  status: boolean | null
+  advice?: string
+}
+export interface LoginRecord {
+  user: string
+  from: string
+  when: string
+  failed: boolean
+}
+export interface SecurityReport {
+  /** false when the data below was collected without root (partial results). */
+  elevated: boolean
+  ufw: UfwStatus
+  /** another firewall was detected instead of ufw (firewalld / nftables). */
+  otherFirewall?: string
+  ports: ListeningPort[]
+  fail2ban: { installed: boolean; jails: Fail2banJail[] }
+  sshd: AuditItem[]
+  logins: LoginRecord[]
+}
+export interface UpdateReport {
+  manager: string
+  total: number
+  security: number
+  packages: string[]
+}
+
+// ---- Services ----
+export interface ServiceUnit {
+  name: string
+  load: string
+  active: string
+  sub: string
+  description: string
+  /** enabled / disabled / static / masked, from list-unit-files. */
+  startup: string
+}
+
+// ---- Docker ----
+export interface DockerContainer {
+  id: string
+  name: string
+  image: string
+  state: string
+  status: string
+  ports: string
+}
+export interface DockerImage {
+  id: string
+  repository: string
+  tag: string
+  size: string
+  created: string
+}
+export interface DockerReport {
+  installed: boolean
+  /** false when the daemon is unreachable or we lack permission. */
+  accessible: boolean
+  message?: string
+  containers: DockerContainer[]
+  images: DockerImage[]
+}
+
 export interface RowChanges {
   inserts: { values: Record<string, unknown> }[]
   updates: { where: Record<string, unknown>; set: Record<string, unknown> }[]

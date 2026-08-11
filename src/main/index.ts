@@ -5,6 +5,7 @@ import { registerSshIpc } from './ipc/ssh'
 import { registerDbIpc } from './ipc/db'
 import { registerGitIpc } from './ipc/git'
 import { registerAppIpc } from './ipc/app'
+import { registerOpsIpc } from './ipc/ops'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -43,6 +44,7 @@ app.whenReady().then(() => {
   registerDbIpc()
   registerGitIpc()
   registerAppIpc()
+  registerOpsIpc()
 
   createWindow()
 
