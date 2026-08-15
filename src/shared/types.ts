@@ -2,6 +2,16 @@ import type { DatabaseKind } from './databases'
 
 export type AuthType = 'password' | 'key'
 
+/** A saved shell command, runnable into any terminal open on its server. */
+export interface Snippet {
+  id: string
+  name: string
+  command: string
+  /** when true, sending the snippet also presses Enter instead of only typing it. */
+  autoRun?: boolean
+  createdAt: number
+}
+
 export interface Server {
   id: string
   name: string
@@ -19,6 +29,8 @@ export interface Server {
   sudoPassword?: string
   /** optional accent color (hex) to flag e.g. production. */
   color?: string
+  /** saved commands for this host, offered in its terminal toolbar. */
+  snippets?: Snippet[]
 }
 
 export interface Database {

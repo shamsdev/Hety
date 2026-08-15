@@ -31,6 +31,8 @@ export default function ServerDialog({
   const save = (): void => {
     if (!name.trim() || !host.trim()) return
     upsertServer(projectId, {
+      // Spread first so fields this form doesn't edit (snippets) survive a save.
+      ...server,
       id: server?.id ?? newId(),
       name: name.trim(),
       host: host.trim(),
