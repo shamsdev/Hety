@@ -16,10 +16,14 @@ import { ResizeHandle, usePersistedSize } from '../lib/resize'
 import ProjectDialog from './dialogs/ProjectDialog'
 import type { Project } from '@shared/types'
 
+/** macOS shows ⌘, everything else Ctrl. */
+const MOD = navigator.platform.toLowerCase().includes('mac') ? '⌘' : 'Ctrl '
+
 export default function Sidebar(): ReactNode {
   const projects = useApp((s) => s.data.projects)
   const selectedId = useApp((s) => s.selectedProjectId)
   const select = useApp((s) => s.selectProject)
+  const setPaletteOpen = useApp((s) => s.setPaletteOpen)
   const liveSsh = useApp((s) => s.liveSsh)
   const liveDb = useApp((s) => s.liveDb)
   const [query, setQuery] = useState('')
@@ -133,11 +137,18 @@ export default function Sidebar(): ReactNode {
             <Search size={14} className="pointer-events-none absolute left-2.5 top-2.5 text-ink-faint" />
             <input
               ref={searchRef}
-              className="w-full rounded-lg bg-bg-input py-2 pl-8 pr-2 text-[13px] outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-accent"
+              className="w-full rounded-lg bg-bg-input py-2 pl-8 pr-12 text-[13px] outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-accent"
               placeholder="Search projects…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
+            <button
+              title="Open the command palette"
+              onClick={() => setPaletteOpen(true)}
+              className="absolute right-1.5 top-1.5 rounded border border-line bg-bg-elevated px-1.5 py-[3px] text-[10px] font-semibold text-ink-faint hover:text-ink"
+            >
+              {MOD}K
+            </button>
           </div>
         </div>
 

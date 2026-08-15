@@ -11,6 +11,7 @@ import {
   Unplug
 } from 'lucide-react'
 import type { Project, RemoteHostInfo, Server } from '@shared/types'
+import { useOpenRequest } from '../../store'
 import { cn, EmptyState, StatusDot, colorTint } from '../../lib/ui'
 import { ResizeHandle, usePersistedSize } from '../../lib/resize'
 import { ToolButton } from './common'
@@ -106,6 +107,13 @@ export default function OpsPanel({
     void window.api.ops.disconnect(server.id)
     setConns((c) => ({ ...c, [server.id]: { status: 'idle' } }))
   }
+
+  // Command palette: select (and connect) the requested server.
+  useOpenRequest(project.id, 'ops', ({ kind, id }) => {
+    if (kind !== 'server' || !id) return
+    const server = project.servers.find((s) => s.id === id)
+    if (server) select(server)
+  })
 
   if (project.servers.length === 0) {
     return (

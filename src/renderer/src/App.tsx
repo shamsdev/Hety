@@ -4,6 +4,7 @@ import Gate from './components/Gate'
 import Sidebar from './components/Sidebar'
 import ProjectGallery from './components/ProjectGallery'
 import Workspace from './components/Workspace'
+import CommandPalette from './components/CommandPalette'
 import { Toaster } from './lib/toast'
 import { cn } from './lib/ui'
 
@@ -34,6 +35,7 @@ export default function App(): ReactNode {
           </div>
         ))}
       </div>
+      <CommandPalette />
       <Toaster />
     </div>
   )

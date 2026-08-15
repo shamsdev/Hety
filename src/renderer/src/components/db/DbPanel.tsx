@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Plus,
   Database as DbIcon,
@@ -18,7 +18,7 @@ import {
 import type { Project, Database, DbSchema, SchemaTable } from '@shared/types'
 import { getDatabaseKindInfo } from '@shared/databases'
 import { buildSelectAll, quoteQualified } from '@shared/sql'
-import { useApp, newId } from '../../store'
+import { useApp, useOpenRequest, newId } from '../../store'
 import { cn, EmptyState, StatusDot, colorTint, AnchorMenu } from '../../lib/ui'
 import { ResizeHandle, usePersistedSize } from '../../lib/resize'
 import DatabaseDialog from '../dialogs/DatabaseDialog'
@@ -71,6 +71,8 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
   const [railW, setRailW] = usePersistedSize('db.rail', 240, 180, 420)
   const [schemaW, setSchemaW] = usePersistedSize('db.schema', 240, 160, 420)
   const setLive = useApp((s) => s.setLive)
+  /** Saved query the palette asked for, opened once its database is connected. */
+  const pendingQuery = useRef<string | null>(null)
 
   const selectedDb = project.databases.find((d) => d.id === selectedDbId) ?? null
   const selectedDbInfo = selectedDb ? getDatabaseKindInfo(selectedDb.kind) : null
@@ -136,7 +138,10 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
       setConn({ id: cid, status: 'connected' })
       if (selectedDb.locked) void window.api.db.setReadOnly(cid, true)
       const dt = newId()
-      setTabs([{ tabId: dt, title: 'Query' }])
+      const requested = pendingQuery.current
+      pendingQuery.current = null
+      const sq = requested ? savedQueries.find((q) => q.id === requested) : undefined
+      setTabs([sq ? { tabId: dt, title: sq.name, initialSql: sq.sql } : { tabId: dt, title: 'Query' }])
       setActive(dt)
       const sc = await window.api.db.introspect(cid)
       if (!cancelled && sc.ok && sc.data) setSchema(sc.data)
@@ -147,6 +152,32 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDbId, selectedDb?.kind, gen])
+
+  // Command palette: select a database, or open a saved query on the one it belongs to.
+  useOpenRequest(project.id, 'db', ({ kind, id }) => {
+    if (!id) return
+    if (kind === 'database') {
+      if (project.databases.some((d) => d.id === id)) setSelectedDbId(id)
+      return
+    }
+    if (kind !== 'query') return
+    const sq = savedQueries.find((q) => q.id === id)
+    if (!sq) return
+
+    const target =
+      sq.databaseId && project.databases.some((d) => d.id === sq.databaseId) ? sq.databaseId : null
+
+    if (target && target !== selectedDbId) {
+      // The connect effect clears the tab list, so hand the query to it instead.
+      pendingQuery.current = sq.id
+      setSelectedDbId(target)
+    } else if (conn.status === 'connected') {
+      openConsole(sq.name, sq.sql, false)
+    } else if (target) {
+      pendingQuery.current = sq.id
+      setGen((g) => g + 1)
+    }
+  })
 
   const refreshSchema = async (): Promise<void> => {
     if (!conn.id) return

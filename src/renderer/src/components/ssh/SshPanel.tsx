@@ -9,7 +9,7 @@ import {
   MoreHorizontal
 } from 'lucide-react'
 import type { Project, Server } from '@shared/types'
-import { useApp, EMPTY_LIVE } from '../../store'
+import { useApp, useOpenRequest, EMPTY_LIVE } from '../../store'
 import { cn, EmptyState, StatusDot, colorTint, AnchorMenu } from '../../lib/ui'
 import { ResizeHandle, usePersistedSize } from '../../lib/resize'
 import ServerDialog from '../dialogs/ServerDialog'
@@ -56,6 +56,16 @@ export default function SshPanel({
       return next
     })
   }
+
+  // Command palette: focus an existing session for the server, else open one.
+  useOpenRequest(project.id, 'ssh', ({ kind, id }) => {
+    if (kind !== 'server' || !id) return
+    const server = project.servers.find((s) => s.id === id)
+    if (!server) return
+    const existing = tabs.find((t) => t.server.id === id)
+    if (existing) setActive(existing.tabId)
+    else openSession(server)
+  })
 
   const serverLive = (serverId: string): boolean =>
     tabs.some((t) => t.server.id === serverId && liveKeys.includes(t.tabId))

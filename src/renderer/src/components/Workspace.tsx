@@ -9,7 +9,7 @@ import {
   Trash2,
   ServerCog
 } from 'lucide-react'
-import { useApp } from '../store'
+import { useApp, type WorkspaceTab } from '../store'
 import { cn, ProjectIcon, StatusDot } from '../lib/ui'
 import SshPanel from './ssh/SshPanel'
 import OpsPanel from './ops/OpsPanel'
@@ -18,9 +18,7 @@ import DbPanel from './db/DbPanel'
 import BoardPanel from './board/BoardPanel'
 import ProjectDialog from './dialogs/ProjectDialog'
 
-type Tab = 'ssh' | 'ops' | 'repo' | 'db' | 'board'
-
-const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
+const TABS: { id: WorkspaceTab; label: string; icon: ReactNode }[] = [
   { id: 'ssh', label: 'SSH', icon: <Terminal size={15} /> },
   { id: 'ops', label: 'Remote', icon: <ServerCog size={15} /> },
   { id: 'repo', label: 'Repository', icon: <GitBranch size={15} /> },
@@ -42,7 +40,10 @@ export default function Workspace({
   const deleteProject = useApp((s) => s.deleteProject)
   const sshLive = useApp((s) => (s.liveSsh[projectId]?.length ?? 0) > 0)
   const dbLive = useApp((s) => (s.liveDb[projectId]?.length ?? 0) > 0)
-  const [tab, setTab] = useState<Tab>('ssh')
+  // Lives in the store so the command palette can jump straight to a tab.
+  const tab = useApp((s) => s.activeTab[projectId] ?? 'ssh')
+  const setActiveTab = useApp((s) => s.setActiveTab)
+  const setTab = (t: WorkspaceTab): void => setActiveTab(projectId, t)
   const [editing, setEditing] = useState(false)
 
   if (!project) return null

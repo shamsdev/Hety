@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { create } from 'zustand'
 import type { AppData, Project, Server, Database, SavedQuery } from '@shared/types'
 import { emptyAppData } from '@shared/types'
@@ -9,6 +10,22 @@ export function newId(): string {
 
 type LiveKind = 'ssh' | 'db'
 
+/** The tabs inside a project's Workspace. */
+export type WorkspaceTab = 'ssh' | 'ops' | 'repo' | 'db' | 'board'
+
+export type OpenTargetKind = 'server' | 'database' | 'repository' | 'query'
+
+/** A one-shot "go here and focus this" request, raised by the command palette
+ *  and picked up by whichever panel owns the target. */
+export interface OpenRequest {
+  projectId: string
+  tab: WorkspaceTab
+  targetKind?: OpenTargetKind
+  targetId?: string
+  /** Bumped on every request so asking for the same target twice re-fires. */
+  nonce: number
+}
+
 interface AppState {
   ready: boolean
   data: AppData
@@ -18,6 +35,13 @@ interface AppState {
   /** Live connection keys keyed by project id (ssh sessions / db connections). */
   liveSsh: Record<string, string[]>
   liveDb: Record<string, string[]>
+  /** Active Workspace tab per project — lifted out of Workspace so the palette can set it. */
+  activeTab: Record<string, WorkspaceTab>
+  openRequest: OpenRequest | null
+  paletteOpen: boolean
+  setActiveTab: (projectId: string, tab: WorkspaceTab) => void
+  requestOpen: (req: Omit<OpenRequest, 'nonce'>) => void
+  setPaletteOpen: (open: boolean) => void
   load: (data: AppData) => void
   selectProject: (id: string | null) => void
   upsertProject: (p: Project) => void
@@ -79,6 +103,23 @@ export const useApp = create<AppState>((set, get) => ({
   openProjectIds: [],
   liveSsh: {},
   liveDb: {},
+  activeTab: {},
+  openRequest: null,
+  paletteOpen: false,
+
+  setActiveTab: (projectId, tab) =>
+    set({ activeTab: { ...get().activeTab, [projectId]: tab } }),
+
+  setPaletteOpen: (open) => set({ paletteOpen: open }),
+
+  requestOpen: (req) => {
+    get().selectProject(req.projectId)
+    set({
+      activeTab: { ...get().activeTab, [req.projectId]: req.tab },
+      openRequest: { ...req, nonce: (get().openRequest?.nonce ?? 0) + 1 },
+      paletteOpen: false
+    })
+  },
 
   load: (data) => set({ data: normalizeAppData(data), ready: true }),
 
@@ -122,12 +163,14 @@ export const useApp = create<AppState>((set, get) => ({
     }
     const { [id]: _s, ...liveSsh } = get().liveSsh
     const { [id]: _d, ...liveDb } = get().liveDb
+    const { [id]: _t, ...activeTab } = get().activeTab
     set({
       data,
       selectedProjectId: get().selectedProjectId === id ? null : get().selectedProjectId,
       openProjectIds: get().openProjectIds.filter((x) => x !== id),
       liveSsh,
-      liveDb
+      liveDb,
+      activeTab
     })
     persist(data)
   },
@@ -210,3 +253,26 @@ export const useApp = create<AppState>((set, get) => ({
     }
   }
 }))
+
+/**
+ * Run `handler` when the palette asks this project/tab to focus something.
+ * Each request fires once per panel — the nonce it was last seen at is tracked
+ * locally, so no store write is needed to "consume" it.
+ */
+export function useOpenRequest(
+  projectId: string,
+  tab: WorkspaceTab,
+  handler: (target: { kind?: OpenTargetKind; id?: string }) => void
+): void {
+  const request = useApp((s) => s.openRequest)
+  const seen = useRef(0)
+  const cb = useRef(handler)
+  cb.current = handler
+
+  useEffect(() => {
+    if (!request || request.nonce === seen.current) return
+    if (request.projectId !== projectId || request.tab !== tab) return
+    seen.current = request.nonce
+    cb.current({ kind: request.targetKind, id: request.targetId })
+  }, [request, projectId, tab])
+}
