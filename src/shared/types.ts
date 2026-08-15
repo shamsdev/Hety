@@ -108,15 +108,34 @@ export interface SavedQuery {
   createdAt: number
 }
 
+/** One executed statement, logged so it can be found and re-run later. */
+export interface QueryHistoryEntry {
+  id: string
+  sql: string
+  projectId?: string
+  databaseId?: string
+  /** Database name as of the run, so history stays readable after a delete. */
+  databaseName?: string
+  ranAt: number
+  elapsedMs: number
+  /** Rows returned or affected; absent when the statement failed. */
+  rowCount?: number
+  error?: string
+}
+
+/** Newest-first cap on the history log, to bound the size of the vault. */
+export const QUERY_HISTORY_LIMIT = 500
+
 export interface AppData {
   version: number
   projects: Project[]
   savedQueries: SavedQuery[]
+  queryHistory: QueryHistoryEntry[]
   settings: Record<string, unknown>
 }
 
 export function emptyAppData(): AppData {
-  return { version: 1, projects: [], savedQueries: [], settings: {} }
+  return { version: 1, projects: [], savedQueries: [], queryHistory: [], settings: {} }
 }
 
 // ---- DB query / schema ----

@@ -21,7 +21,13 @@ export function normalizeProject(p: Project): Project {
 }
 
 export function normalizeAppData(data: AppData): AppData {
-  return { ...data, projects: (data.projects ?? []).map(normalizeProject) }
+  return {
+    ...data,
+    projects: (data.projects ?? []).map(normalizeProject),
+    savedQueries: data.savedQueries ?? [],
+    // Absent in vaults written before query history existed.
+    queryHistory: data.queryHistory ?? []
+  }
 }
 
 export function filterProjects(projects: Project[], query: string, tag: string | null): Project[] {

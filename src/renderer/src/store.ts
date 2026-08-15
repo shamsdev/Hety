@@ -1,7 +1,14 @@
 import { useEffect, useRef } from 'react'
 import { create } from 'zustand'
-import type { AppData, Project, Server, Database, SavedQuery } from '@shared/types'
-import { emptyAppData } from '@shared/types'
+import type {
+  AppData,
+  Project,
+  Server,
+  Database,
+  SavedQuery,
+  QueryHistoryEntry
+} from '@shared/types'
+import { emptyAppData, QUERY_HISTORY_LIMIT } from '@shared/types'
 import { normalizeAppData } from './lib/projects'
 
 export function newId(): string {
@@ -52,6 +59,10 @@ interface AppState {
   deleteDatabase: (projectId: string, id: string) => void
   addSavedQuery: (q: SavedQuery) => void
   deleteSavedQuery: (id: string) => void
+  addQueryHistory: (entry: QueryHistoryEntry) => void
+  deleteQueryHistory: (id: string) => void
+  /** Clear the whole log, or just one database's entries. */
+  clearQueryHistory: (databaseId?: string) => void
   setLive: (kind: LiveKind, projectId: string, key: string, live: boolean) => void
 }
 
@@ -159,7 +170,8 @@ export const useApp = create<AppState>((set, get) => ({
     const data = {
       ...cur,
       projects: cur.projects.filter((p) => p.id !== id),
-      savedQueries: cur.savedQueries.filter((q) => q.projectId !== id)
+      savedQueries: cur.savedQueries.filter((q) => q.projectId !== id),
+      queryHistory: (cur.queryHistory ?? []).filter((h) => h.projectId !== id)
     }
     const { [id]: _s, ...liveSsh } = get().liveSsh
     const { [id]: _d, ...liveDb } = get().liveDb
@@ -224,7 +236,8 @@ export const useApp = create<AppState>((set, get) => ({
         ...p,
         databases: p.databases.filter((x) => x.id !== id)
       })),
-      savedQueries: get().data.savedQueries.filter((q) => q.databaseId !== id)
+      savedQueries: get().data.savedQueries.filter((q) => q.databaseId !== id),
+      queryHistory: (get().data.queryHistory ?? []).filter((h) => h.databaseId !== id)
     }
     set({ data })
     persist(data)
@@ -240,6 +253,40 @@ export const useApp = create<AppState>((set, get) => ({
     const data = {
       ...get().data,
       savedQueries: get().data.savedQueries.filter((q) => q.id !== id)
+    }
+    set({ data })
+    persist(data)
+  },
+
+  addQueryHistory: (entry) => {
+    const previous = get().data.queryHistory ?? []
+    // Re-running the same statement moves the existing entry up rather than
+    // filling the log with duplicates.
+    const deduped = previous.filter(
+      (h) => !(h.sql === entry.sql && h.databaseId === entry.databaseId)
+    )
+    const data = {
+      ...get().data,
+      queryHistory: [entry, ...deduped].slice(0, QUERY_HISTORY_LIMIT)
+    }
+    set({ data })
+    persist(data)
+  },
+
+  deleteQueryHistory: (id) => {
+    const data = {
+      ...get().data,
+      queryHistory: (get().data.queryHistory ?? []).filter((h) => h.id !== id)
+    }
+    set({ data })
+    persist(data)
+  },
+
+  clearQueryHistory: (databaseId) => {
+    const previous = get().data.queryHistory ?? []
+    const data = {
+      ...get().data,
+      queryHistory: databaseId ? previous.filter((h) => h.databaseId !== databaseId) : []
     }
     set({ data })
     persist(data)

@@ -11,6 +11,8 @@ import {
   Search,
   Bookmark,
   FileCode2,
+  History,
+  CircleAlert,
   Lock,
   Unlock,
   MoreHorizontal
@@ -19,6 +21,7 @@ import type { Project, Database, DbSchema, SchemaTable } from '@shared/types'
 import { getDatabaseKindInfo } from '@shared/databases'
 import { buildSelectAll, quoteQualified } from '@shared/sql'
 import { useApp, useOpenRequest, newId } from '../../store'
+import { oneLine, relativeTime } from '../../lib/format'
 import { cn, EmptyState, StatusDot, colorTint, AnchorMenu } from '../../lib/ui'
 import { ResizeHandle, usePersistedSize } from '../../lib/resize'
 import DatabaseDialog from '../dialogs/DatabaseDialog'
@@ -39,6 +42,42 @@ interface ConsoleTab {
   editTable?: EditTable
 }
 
+/** Tab label for a console reopened from history: the first few words of the SQL. */
+function historyTitle(sql: string): string {
+  const flat = oneLine(sql)
+  return flat.length > 24 ? flat.slice(0, 24) + '…' : flat
+}
+
+function RailTab({
+  active,
+  icon,
+  label,
+  count,
+  onClick
+}: {
+  active: boolean
+  icon: ReactNode
+  label: string
+  count?: number
+  onClick: () => void
+}): ReactNode {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-bold uppercase tracking-wider transition-colors',
+        active ? 'bg-bg-elevated text-ink' : 'text-ink-faint hover:text-ink-soft'
+      )}
+    >
+      {icon}
+      {label}
+      {count !== undefined && count > 0 && (
+        <span className="font-medium normal-case opacity-60">{count}</span>
+      )}
+    </button>
+  )
+}
+
 const STATUS_COLOR: Record<Conn['status'], string> = {
   idle: '#646b78',
   connecting: '#e0b341',
@@ -52,6 +91,10 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
   const savedQueries = useApp((s) => s.data.savedQueries)
   const addSavedQuery = useApp((s) => s.addSavedQuery)
   const deleteSavedQuery = useApp((s) => s.deleteSavedQuery)
+  const queryHistory = useApp((s) => s.data.queryHistory)
+  const addQueryHistory = useApp((s) => s.addQueryHistory)
+  const deleteQueryHistory = useApp((s) => s.deleteQueryHistory)
+  const clearQueryHistory = useApp((s) => s.clearQueryHistory)
 
   const [selectedDbId, setSelectedDbId] = useState<string | null>(null)
   const [conn, setConn] = useState<Conn>({ id: null, status: 'idle' })
@@ -60,7 +103,9 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
   const [active, setActive] = useState<string | null>(null)
   const [gen, setGen] = useState(0)
   const [dialog, setDialog] = useState<{ database?: Database } | null>(null)
+  const [rail, setRail] = useState<'saved' | 'history'>('saved')
   const [savedSearch, setSavedSearch] = useState('')
+  const [historySearch, setHistorySearch] = useState('')
   const [menuId, setMenuId] = useState<string | null>(null)
   const [menuAnchor, setMenuAnchor] = useState<{
     top: number
@@ -221,6 +266,37 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
     )
   }, [savedQueries, savedSearch])
 
+  /** History for the selected database only — the log is shared across projects. */
+  const history = useMemo(
+    () => (selectedDbId ? (queryHistory ?? []).filter((h) => h.databaseId === selectedDbId) : []),
+    [queryHistory, selectedDbId]
+  )
+
+  const filteredHistory = useMemo(() => {
+    const q = historySearch.toLowerCase().trim()
+    return q ? history.filter((h) => h.sql.toLowerCase().includes(q)) : history
+  }, [history, historySearch])
+
+  const recordRun = (run: {
+    sql: string
+    elapsedMs: number
+    rowCount?: number
+    error?: string
+  }): void => {
+    if (!selectedDb) return
+    addQueryHistory({
+      id: newId(),
+      sql: run.sql,
+      projectId: project.id,
+      databaseId: selectedDb.id,
+      databaseName: selectedDb.name,
+      ranAt: Date.now(),
+      elapsedMs: run.elapsedMs,
+      rowCount: run.rowCount,
+      error: run.error
+    })
+  }
+
   return (
     <div className="flex h-full">
       {/* Rail: databases + saved queries */}
@@ -336,50 +412,128 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
           })}
         </div>
 
-        {/* Saved queries */}
+        {/* Saved queries / history */}
         <div className="mt-2 flex min-h-0 flex-1 flex-col border-t border-line">
-          <div className="flex items-center gap-1.5 px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-ink-faint">
-            <Bookmark size={12} /> Saved queries
+          <div className="flex items-center gap-1 px-2 pt-2">
+            <RailTab
+              active={rail === 'saved'}
+              icon={<Bookmark size={11} />}
+              label="Saved"
+              onClick={() => setRail('saved')}
+            />
+            <RailTab
+              active={rail === 'history'}
+              icon={<History size={11} />}
+              label="History"
+              count={history.length}
+              onClick={() => setRail('history')}
+            />
+            {rail === 'history' && history.length > 0 && (
+              <button
+                title="Clear history for this database"
+                className="ml-auto rounded p-1 text-ink-faint hover:bg-bg-hover hover:text-bad"
+                onClick={() => {
+                  if (confirm('Clear the query history for this database?'))
+                    clearQueryHistory(selectedDbId ?? undefined)
+                }}
+              >
+                <Trash2 size={12} />
+              </button>
+            )}
           </div>
-          <div className="px-2 pb-1">
+
+          <div className="px-2 pb-1 pt-1.5">
             <div className="relative">
               <Search size={13} className="pointer-events-none absolute left-2 top-2 text-ink-faint" />
               <input
                 className="w-full rounded-md bg-bg-input py-1.5 pl-7 pr-2 text-xs outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-accent"
-                placeholder="Search queries..."
-                value={savedSearch}
-                onChange={(e) => setSavedSearch(e.target.value)}
+                placeholder={rail === 'saved' ? 'Search queries...' : 'Search history...'}
+                value={rail === 'saved' ? savedSearch : historySearch}
+                onChange={(e) =>
+                  rail === 'saved' ? setSavedSearch(e.target.value) : setHistorySearch(e.target.value)
+                }
               />
             </div>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-            {filteredSaved.length === 0 && (
-              <p className="px-2 py-2 text-[11px] text-ink-faint">No saved queries.</p>
-            )}
-            {filteredSaved.map((sq) => (
-              <div
-                key={sq.id}
-                className="group flex items-center gap-1.5 rounded-md px-2 py-1.5 hover:bg-bg-hover"
-                title={sq.sql}
-              >
-                <FileCode2 size={12} className="shrink-0 text-ink-faint" />
-                <button
-                  className="min-w-0 flex-1 truncate text-left text-[12px]"
-                  onClick={() => openConsole(sq.name, sq.sql, false)}
+
+          {rail === 'saved' ? (
+            <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+              {filteredSaved.length === 0 && (
+                <p className="px-2 py-2 text-[11px] text-ink-faint">No saved queries.</p>
+              )}
+              {filteredSaved.map((sq) => (
+                <div
+                  key={sq.id}
+                  className="group flex items-center gap-1.5 rounded-md px-2 py-1.5 hover:bg-bg-hover"
+                  title={sq.sql}
                 >
-                  {sq.databaseId === selectedDbId && <span className="text-accent">* </span>}
-                  {sq.name}
-                </button>
-                <button
-                  className="shrink-0 rounded p-0.5 text-ink-faint opacity-0 hover:text-bad group-hover:opacity-100"
-                  title="Delete"
-                  onClick={() => deleteSavedQuery(sq.id)}
+                  <FileCode2 size={12} className="shrink-0 text-ink-faint" />
+                  <button
+                    className="min-w-0 flex-1 truncate text-left text-[12px]"
+                    onClick={() => openConsole(sq.name, sq.sql, false)}
+                  >
+                    {sq.databaseId === selectedDbId && <span className="text-accent">* </span>}
+                    {sq.name}
+                  </button>
+                  <button
+                    className="shrink-0 rounded p-0.5 text-ink-faint opacity-0 hover:text-bad group-hover:opacity-100"
+                    title="Delete"
+                    onClick={() => deleteSavedQuery(sq.id)}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+              {filteredHistory.length === 0 && (
+                <p className="px-2 py-2 text-[11px] text-ink-faint">
+                  {selectedDb
+                    ? history.length === 0
+                      ? 'Nothing run yet on this database.'
+                      : 'No matches.'
+                    : 'Select a database to see its history.'}
+                </p>
+              )}
+              {filteredHistory.map((h) => (
+                <div
+                  key={h.id}
+                  className="group rounded-md px-2 py-1.5 hover:bg-bg-hover"
+                  title={h.error ? `${h.sql}\n\n${h.error}` : h.sql}
                 >
-                  <X size={12} />
-                </button>
-              </div>
-            ))}
-          </div>
+                  <div className="flex items-start gap-1.5">
+                    <span className="mt-[3px] shrink-0">
+                      {h.error ? (
+                        <CircleAlert size={12} className="text-bad" />
+                      ) : (
+                        <History size={12} className="text-ink-faint" />
+                      )}
+                    </span>
+                    <button
+                      className="min-w-0 flex-1 text-left"
+                      onClick={() => openConsole(historyTitle(h.sql), h.sql, false)}
+                    >
+                      <span className="block truncate font-mono text-[11px] text-ink">
+                        {oneLine(h.sql)}
+                      </span>
+                      <span className="block truncate text-[10px] text-ink-faint">
+                        {relativeTime(h.ranAt)} ·{' '}
+                        {h.error ? 'failed' : `${h.rowCount ?? 0} rows · ${h.elapsedMs} ms`}
+                      </span>
+                    </button>
+                    <button
+                      className="shrink-0 rounded p-0.5 text-ink-faint opacity-0 hover:text-bad group-hover:opacity-100"
+                      title="Remove from history"
+                      onClick={() => deleteQueryHistory(h.id)}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
       <ResizeHandle axis="x" size={railW} onResize={setRailW} />
@@ -571,6 +725,7 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
                             editTable={t.editTable}
                             locked={!!selectedDb.locked}
                             onSave={onSave}
+                            onExecuted={recordRun}
                           />
                         </div>
                       ))}

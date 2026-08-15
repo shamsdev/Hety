@@ -55,7 +55,8 @@ export default function SqlConsole({
   autorun,
   editTable,
   locked,
-  onSave
+  onSave,
+  onExecuted
 }: {
   connectionId: string | null
   connected: boolean
@@ -67,6 +68,8 @@ export default function SqlConsole({
   editTable?: EditTable
   locked?: boolean
   onSave: (name: string, sql: string) => void
+  /** Called after every run, successful or not, so it can be logged to history. */
+  onExecuted?: (run: { sql: string; elapsedMs: number; rowCount?: number; error?: string }) => void
 }): ReactNode {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -74,6 +77,8 @@ export default function SqlConsole({
   const runRef = useRef<() => void>(() => undefined)
   const connRef = useRef(connectionId)
   connRef.current = connectionId
+  const onExecutedRef = useRef(onExecuted)
+  onExecutedRef.current = onExecuted
 
   const [result, setResult] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -89,6 +94,7 @@ export default function SqlConsole({
     if (!text) return
     setRunning(true)
     setError(null)
+    const startedAt = Date.now()
     const r = await window.api.db.query(connRef.current, text)
     setRunning(false)
     if (r.ok && r.data) {
@@ -97,6 +103,15 @@ export default function SqlConsole({
     } else {
       setError(r.ok ? 'No data' : r.error)
     }
+    // The driver times the statement itself; wall time is the fallback for
+    // failures, which come back without a result.
+    const failure = r.ok && r.data ? undefined : r.ok ? 'No data' : r.error
+    onExecutedRef.current?.({
+      sql: text,
+      elapsedMs: r.ok && r.data ? r.data.elapsedMs : Date.now() - startedAt,
+      rowCount: r.ok && r.data ? r.data.rowCount : undefined,
+      error: failure
+    })
   }
 
   const run = (): void => {
