@@ -43,7 +43,7 @@ import type {
   GitStash,
   MergeMode
 } from '@shared/types'
-import { useApp, newId } from '../../store'
+import { useApp, useOpenRequest, newId } from '../../store'
 import { basename } from '../../lib/projects'
 import { Button, Spinner, Modal, Input, Field, cn } from '../../lib/ui'
 import { ResizeHandle, usePersistedSize } from '../../lib/resize'
@@ -87,6 +87,11 @@ export default function RepoPanel({ project }: { project: Project }): ReactNode 
   const [addOpen, setAddOpen] = useState(false)
 
   const active = repositories.find((r) => r.id === activeId) ?? repositories[0] ?? null
+
+  // Command palette: switch to the requested repository.
+  useOpenRequest(project.id, 'repo', ({ kind, id }) => {
+    if (kind === 'repository' && id && repositories.some((r) => r.id === id)) setActiveId(id)
+  })
 
   const setRepos = (repos: Repository[]): void => upsertProject({ ...project, repositories: repos })
 

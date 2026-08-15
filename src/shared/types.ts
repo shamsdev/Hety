@@ -2,6 +2,16 @@ import type { DatabaseKind } from './databases'
 
 export type AuthType = 'password' | 'key'
 
+/** A saved shell command, runnable into any terminal open on its server. */
+export interface Snippet {
+  id: string
+  name: string
+  command: string
+  /** when true, sending the snippet also presses Enter instead of only typing it. */
+  autoRun?: boolean
+  createdAt: number
+}
+
 export interface Server {
   id: string
   name: string
@@ -19,6 +29,8 @@ export interface Server {
   sudoPassword?: string
   /** optional accent color (hex) to flag e.g. production. */
   color?: string
+  /** saved commands for this host, offered in its terminal toolbar. */
+  snippets?: Snippet[]
 }
 
 export interface Database {
@@ -96,15 +108,34 @@ export interface SavedQuery {
   createdAt: number
 }
 
+/** One executed statement, logged so it can be found and re-run later. */
+export interface QueryHistoryEntry {
+  id: string
+  sql: string
+  projectId?: string
+  databaseId?: string
+  /** Database name as of the run, so history stays readable after a delete. */
+  databaseName?: string
+  ranAt: number
+  elapsedMs: number
+  /** Rows returned or affected; absent when the statement failed. */
+  rowCount?: number
+  error?: string
+}
+
+/** Newest-first cap on the history log, to bound the size of the vault. */
+export const QUERY_HISTORY_LIMIT = 500
+
 export interface AppData {
   version: number
   projects: Project[]
   savedQueries: SavedQuery[]
+  queryHistory: QueryHistoryEntry[]
   settings: Record<string, unknown>
 }
 
 export function emptyAppData(): AppData {
-  return { version: 1, projects: [], savedQueries: [], settings: {} }
+  return { version: 1, projects: [], savedQueries: [], queryHistory: [], settings: {} }
 }
 
 // ---- DB query / schema ----

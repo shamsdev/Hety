@@ -2,10 +2,12 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { RotateCw } from 'lucide-react'
-import type { Server } from '@shared/types'
-import { StatusDot } from '../../lib/ui'
+import { RotateCw, Zap } from 'lucide-react'
+import type { Server, Snippet } from '@shared/types'
+import { StatusDot, cn } from '../../lib/ui'
 import { useApp } from '../../store'
+import SnippetPicker from './SnippetPicker'
+import SnippetsDialog from './SnippetsDialog'
 
 type Status = 'connecting' | 'connected' | 'closed' | 'error'
 
@@ -35,6 +37,16 @@ export default function TerminalView({
   const [status, setStatus] = useState<Status>('connecting')
   const [message, setMessage] = useState('')
   const [generation, setGeneration] = useState(0)
+  const [pickerAnchor, setPickerAnchor] = useState<DOMRect | null>(null)
+  const [managing, setManaging] = useState(false)
+
+  // Read the server back out of the store: the tab captured it when the session
+  // opened, so edits (including new snippets) wouldn't otherwise show up here.
+  const liveServer = useApp(
+    (s) => s.data.projects.find((p) => p.id === projectId)?.servers.find((x) => x.id === server.id)
+  )
+  const current = liveServer ?? server
+  const snippets = current.snippets ?? []
 
   useEffect(() => {
     setLive('ssh', projectId, liveKey, status === 'connected')
@@ -172,6 +184,17 @@ export default function TerminalView({
     setGeneration((g) => g + 1)
   }
 
+  /** Type a snippet at the prompt, pressing Enter only when it opted in. */
+  const send = (snippet: Snippet): void => {
+    const id = idRef.current
+    if (!id) return
+    // A shell consumes CR as "execute this line", which is what typing the text
+    // by hand would do too.
+    const text = snippet.command.replace(/\r?\n/g, '\r')
+    window.api.ssh.input(id, snippet.autoRun && !text.endsWith('\r') ? text + '\r' : text)
+    termRef.current?.focus()
+  }
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-line bg-bg-panel px-3 py-1.5">
@@ -189,12 +212,44 @@ export default function TerminalView({
                 : 'Disconnected'}
         </span>
         <button
-          className="ml-auto flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-ink-soft hover:bg-bg-hover hover:text-ink"
+          className={cn(
+            'ml-auto flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold',
+            status === 'connected'
+              ? 'text-ink-soft hover:bg-bg-hover hover:text-ink'
+              : 'cursor-not-allowed text-ink-faint opacity-50'
+          )}
+          title="Saved commands for this server"
+          disabled={status !== 'connected'}
+          onClick={(e) => setPickerAnchor(e.currentTarget.getBoundingClientRect())}
+        >
+          <Zap size={12} /> Snippets
+          {snippets.length > 0 && <span className="text-ink-faint">{snippets.length}</span>}
+        </button>
+        <button
+          className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-ink-soft hover:bg-bg-hover hover:text-ink"
           onClick={reconnect}
         >
           <RotateCw size={12} /> Reconnect
         </button>
       </div>
+
+      {pickerAnchor && (
+        <SnippetPicker
+          anchor={pickerAnchor}
+          snippets={snippets}
+          onPick={send}
+          onManage={() => setManaging(true)}
+          onClose={() => setPickerAnchor(null)}
+        />
+      )}
+      {managing && (
+        <SnippetsDialog
+          projectId={projectId}
+          server={current}
+          onRun={status === 'connected' ? send : undefined}
+          onClose={() => setManaging(false)}
+        />
+      )}
       <div
         ref={hostRef}
         className="min-h-0 flex-1 bg-bg-base"

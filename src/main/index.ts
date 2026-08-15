@@ -1,5 +1,6 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'node:path'
+import * as store from './lib/store'
 import { registerStoreIpc } from './ipc/store'
 import { registerSshIpc } from './ipc/ssh'
 import { registerDbIpc } from './ipc/db'
@@ -55,4 +56,17 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+// Saves are debounced in the main process, so quitting has to wait for the last
+// one to reach disk instead of dropping it.
+let flushing = false
+app.on('before-quit', (e) => {
+  if (flushing || !store.hasPendingWrite()) return
+  e.preventDefault()
+  flushing = true
+  store
+    .flush()
+    .catch(() => undefined)
+    .then(() => app.quit())
 })
