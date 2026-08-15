@@ -20,6 +20,22 @@ type LiveKind = 'ssh' | 'db'
 /** The tabs inside a project's Workspace. */
 export type WorkspaceTab = 'ssh' | 'ops' | 'repo' | 'db' | 'board'
 
+export const DEFAULT_TAB: WorkspaceTab = 'ssh'
+
+/** How many recently visited places Ctrl+Tab remembers. */
+const MRU_LIMIT = 40
+
+/** A "place" is one project's tab — the unit Ctrl+Tab cycles through. */
+export function placeKey(projectId: string, tab: WorkspaceTab): string {
+  return `${projectId}::${tab}`
+}
+
+export function parsePlace(key: string): { projectId: string; tab: WorkspaceTab } | null {
+  const at = key.indexOf('::')
+  if (at < 0) return null
+  return { projectId: key.slice(0, at), tab: key.slice(at + 2) as WorkspaceTab }
+}
+
 export type OpenTargetKind = 'server' | 'database' | 'repository' | 'query'
 
 /** A one-shot "go here and focus this" request, raised by the command palette
@@ -46,6 +62,9 @@ interface AppState {
   activeTab: Record<string, WorkspaceTab>
   openRequest: OpenRequest | null
   paletteOpen: boolean
+  /** Recently visited places, most recent first — the Ctrl+Tab order. */
+  mru: string[]
+  touchPlace: (projectId: string, tab: WorkspaceTab) => void
   setActiveTab: (projectId: string, tab: WorkspaceTab) => void
   requestOpen: (req: Omit<OpenRequest, 'nonce'>) => void
   setPaletteOpen: (open: boolean) => void
@@ -117,6 +136,14 @@ export const useApp = create<AppState>((set, get) => ({
   activeTab: {},
   openRequest: null,
   paletteOpen: false,
+  mru: [],
+
+  touchPlace: (projectId, tab) => {
+    const key = placeKey(projectId, tab)
+    const current = get().mru
+    if (current[0] === key) return
+    set({ mru: [key, ...current.filter((k) => k !== key)].slice(0, MRU_LIMIT) })
+  },
 
   setActiveTab: (projectId, tab) =>
     set({ activeTab: { ...get().activeTab, [projectId]: tab } }),
@@ -182,7 +209,8 @@ export const useApp = create<AppState>((set, get) => ({
       openProjectIds: get().openProjectIds.filter((x) => x !== id),
       liveSsh,
       liveDb,
-      activeTab
+      activeTab,
+      mru: get().mru.filter((k) => parsePlace(k)?.projectId !== id)
     })
     persist(data)
   },
