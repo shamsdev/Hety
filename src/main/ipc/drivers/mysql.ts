@@ -1,5 +1,5 @@
 import mysql from 'mysql2/promise'
-import type { DbSchema, SchemaNamespace, SchemaTable, RowChanges } from '@shared/types'
+import type { ColumnRef, DbSchema, SchemaNamespace, SchemaTable, RowChanges } from '@shared/types'
 import type { ConnectParams, DbDriver, RawResult } from './types'
 
 const q = (name: string): string => '`' + name.replace(/`/g, '``') + '`'
@@ -13,6 +13,13 @@ interface ColumnRow {
   c: string
   d: string
   k: string
+}
+interface ForeignKeyRow {
+  t: string
+  c: string
+  fs: string
+  ft: string
+  fc: string
 }
 
 async function resolveSchema(conn: mysql.Connection, database: string): Promise<string> {
@@ -39,6 +46,17 @@ async function introspect(conn: mysql.Connection, database: string): Promise<DbS
     index.set(r.n, obj)
   }
 
+  const [fkRows] = await conn.query(
+    `SELECT TABLE_NAME AS t, COLUMN_NAME AS c, REFERENCED_TABLE_SCHEMA AS fs,
+            REFERENCED_TABLE_NAME AS ft, REFERENCED_COLUMN_NAME AS fc
+     FROM information_schema.KEY_COLUMN_USAGE
+     WHERE TABLE_SCHEMA = ? AND REFERENCED_TABLE_NAME IS NOT NULL`,
+    [schemaName]
+  )
+  const fks = new Map<string, ColumnRef>()
+  for (const r of fkRows as ForeignKeyRow[])
+    fks.set(`${r.t}.${r.c}`, { schema: r.fs, table: r.ft, column: r.fc })
+
   const [cols] = await conn.query(
     `SELECT TABLE_NAME AS t, COLUMN_NAME AS c, COLUMN_TYPE AS d, COLUMN_KEY AS k
      FROM information_schema.COLUMNS
@@ -46,7 +64,9 @@ async function introspect(conn: mysql.Connection, database: string): Promise<DbS
     [schemaName]
   )
   for (const r of cols as ColumnRow[]) {
-    index.get(r.t)?.columns.push({ name: r.c, type: r.d, pk: r.k === 'PRI' })
+    index
+      .get(r.t)
+      ?.columns.push({ name: r.c, type: r.d, pk: r.k === 'PRI', ref: fks.get(`${r.t}.${r.c}`) })
   }
 
   return { schemas: [ns] }
@@ -149,6 +169,20 @@ export async function createMysql(p: ConnectParams, label: string): Promise<DbDr
       return { columns: [], rows: [], rowCount: header.affectedRows ?? 0, command: 'OK' }
     },
     introspect: () => introspect(conn, p.database),
+    lookupRows: async (ref, value, limit): Promise<RawResult> => {
+      const target = ref.schema ? `${q(ref.schema)}.${q(ref.table)}` : q(ref.table)
+      const [rows, fields] = await conn.query({
+        sql: `SELECT * FROM ${target} WHERE ${q(ref.column)} = ? LIMIT ${Number(limit) || 1}`,
+        values: [value],
+        rowsAsArray: true
+      })
+      const list = (Array.isArray(rows) ? rows : []) as unknown[][]
+      return {
+        columns: ((fields as mysql.FieldPacket[]) ?? []).map((f) => f.name),
+        rows: list,
+        rowCount: list.length
+      }
+    },
     applyChanges: (table, changes) => applyChanges(conn, table, changes),
     setReadOnly: async (): Promise<void> => {
       // MySQL has no easily-set session read-only that blocks writes; the app-level

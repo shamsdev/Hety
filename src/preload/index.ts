@@ -6,6 +6,7 @@ import type {
   Result,
   QueryResult,
   DbSchema,
+  ColumnRef,
   GitStatus,
   GitCommit,
   GitGraphCommit,
@@ -16,6 +17,7 @@ import type {
   RemoteHostInfo,
   RemoteListing,
   RemoteFile,
+  RemoteBinary,
   RemoteExec,
   RemoteMetrics,
   SecurityReport,
@@ -68,6 +70,13 @@ const api = {
       ipcRenderer.invoke('db:query', { id, sql }),
     introspect: (id: string): Promise<Result<DbSchema>> =>
       ipcRenderer.invoke('db:introspect', { id }),
+    relatedRows: (
+      id: string,
+      ref: ColumnRef,
+      value: unknown,
+      limit?: number
+    ): Promise<Result<QueryResult>> =>
+      ipcRenderer.invoke('db:relatedRows', { id, ref, value, limit }),
     applyChanges: (
       id: string,
       table: string,
@@ -161,6 +170,8 @@ const api = {
         ipcRenderer.invoke('ops:fs:list', { server, path }),
       read: (server: Server, path: string): Promise<Result<RemoteFile>> =>
         ipcRenderer.invoke('ops:fs:read', { server, path }),
+      readBinary: (server: Server, path: string): Promise<Result<RemoteBinary>> =>
+        ipcRenderer.invoke('ops:fs:readBinary', { server, path }),
       write: (server: Server, path: string, content: string): Promise<Result<null>> =>
         ipcRenderer.invoke('ops:fs:write', { server, path, content }),
       mkdir: (server: Server, path: string): Promise<Result<null>> =>

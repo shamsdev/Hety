@@ -17,6 +17,7 @@ import {
   ClipboardPaste,
   Copy,
   Download,
+  Eye,
   FileArchive,
   FileCode2,
   FileImage,
@@ -238,6 +239,26 @@ export default function FilesPanel({
     return true
   }
 
+  const promptNewFolder = (): void =>
+    setPrompt({
+      title: 'New folder',
+      label: 'Folder name',
+      value: '',
+      confirm: 'Create',
+      onSubmit: (name) =>
+        run('Folder created', () => window.api.ops.fs.mkdir(server, joinPath(cwd, name)))
+    })
+
+  const promptNewFile = (): void =>
+    setPrompt({
+      title: 'New file',
+      label: 'File name',
+      value: '',
+      confirm: 'Create',
+      onSubmit: (name) =>
+        run('File created', () => window.api.ops.fs.newFile(server, joinPath(cwd, name)))
+    })
+
   const doDelete = async (targets: RemoteEntry[]): Promise<void> => {
     if (!targets.length) return
     const names = targets.length === 1 ? `"${targets[0].name}"` : `${targets.length} items`
@@ -324,34 +345,8 @@ export default function FilesPanel({
         <ToolButton icon={<Upload size={14} />} onClick={() => void doUpload()}>
           Upload
         </ToolButton>
-        <ToolButton
-          icon={<FolderPlus size={14} />}
-          title="New folder"
-          onClick={() =>
-            setPrompt({
-              title: 'New folder',
-              label: 'Folder name',
-              value: '',
-              confirm: 'Create',
-              onSubmit: (name) =>
-                run('Folder created', () => window.api.ops.fs.mkdir(server, joinPath(cwd, name)))
-            })
-          }
-        />
-        <ToolButton
-          icon={<FilePlus2 size={14} />}
-          title="New file"
-          onClick={() =>
-            setPrompt({
-              title: 'New file',
-              label: 'File name',
-              value: '',
-              confirm: 'Create',
-              onSubmit: (name) =>
-                run('File created', () => window.api.ops.fs.newFile(server, joinPath(cwd, name)))
-            })
-          }
-        />
+        <ToolButton icon={<FolderPlus size={14} />} title="New folder" onClick={promptNewFolder} />
+        <ToolButton icon={<FilePlus2 size={14} />} title="New file" onClick={promptNewFile} />
         <ToolButton
           icon={<ClipboardPaste size={14} />}
           title={clipboard ? `Paste ${clipboard.paths.length} item(s)` : 'Nothing copied'}
@@ -432,8 +427,21 @@ export default function FilesPanel({
 
       {error && <PanelError message={error} onRetry={refresh} />}
 
-      {/* Listing */}
-      <div className="min-h-0 flex-1 overflow-auto">
+      {/* Listing — right-clicking the empty area acts on the folder itself. */}
+      <div
+        className="min-h-0 flex-1 overflow-auto"
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) setSelection([])
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          setSelection([])
+          setMenu({
+            entry: null,
+            rect: { top: e.clientY, bottom: e.clientY, left: e.clientX, right: e.clientX + 150 }
+          })
+        }}
+      >
         {loading && !entries.length ? (
           <Loading label={`Reading ${cwd}…`} />
         ) : !visible.length ? (
@@ -466,6 +474,7 @@ export default function FilesPanel({
                     onDoubleClick={() => open(entry)}
                     onContextMenu={(e) => {
                       e.preventDefault()
+                      e.stopPropagation()
                       if (!selection.includes(entry.path)) setSelection([entry.path])
                       setMenu({
                         entry,
@@ -535,6 +544,22 @@ export default function FilesPanel({
             Drop to upload into {cwd}
           </span>
         </div>
+      )}
+
+      {menu && !menu.entry && (
+        <SpaceMenu
+          rect={menu.rect}
+          cwd={cwd}
+          clipboard={clipboard}
+          showHidden={showHidden}
+          onClose={() => setMenu(null)}
+          onNewFolder={promptNewFolder}
+          onNewFile={promptNewFile}
+          onUpload={() => void doUpload()}
+          onPaste={() => void doPaste()}
+          onRefresh={refresh}
+          onToggleHidden={() => setShowHidden((h) => !h)}
+        />
       )}
 
       {menu && menu.entry && (
@@ -625,14 +650,115 @@ export default function FilesPanel({
       )}
 
       {prompt && <TextPrompt config={prompt} onClose={() => setPrompt(null)} />}
-      {viewer && (
-        <FileViewer server={server} entry={viewer} onClose={() => setViewer(null)} onSaved={refresh} />
-      )}
+      {viewer &&
+        (IMAGE_RE.test(viewer.name) ? (
+          <ImageViewer
+            server={server}
+            entry={viewer}
+            onClose={() => setViewer(null)}
+            onDownload={() => void doDownload(viewer)}
+          />
+        ) : (
+          <FileViewer
+            server={server}
+            entry={viewer}
+            onClose={() => setViewer(null)}
+            onSaved={refresh}
+          />
+        ))}
     </div>
   )
 }
 
-// -------------------------------------------------------------- context menu
+// -------------------------------------------------------------- context menus
+
+/** Shared row renderer for both context menus. */
+function MenuItem({
+  icon,
+  label,
+  onClick,
+  onClose,
+  danger,
+  disabled
+}: {
+  icon: ReactNode
+  label: string
+  onClick: () => void
+  onClose: () => void
+  danger?: boolean
+  disabled?: boolean
+}): ReactNode {
+  return (
+    <button
+      disabled={disabled}
+      className={cn(
+        'flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent',
+        danger ? 'text-bad' : 'text-ink'
+      )}
+      onClick={() => {
+        onClick()
+        onClose()
+      }}
+    >
+      {icon}
+      {label}
+    </button>
+  )
+}
+
+/** Right-click on empty space — actions that apply to the current folder. */
+function SpaceMenu({
+  rect,
+  cwd,
+  clipboard,
+  showHidden,
+  onClose,
+  onNewFolder,
+  onNewFile,
+  onUpload,
+  onPaste,
+  onRefresh,
+  onToggleHidden
+}: {
+  rect: { top: number; bottom: number; left: number; right: number }
+  cwd: string
+  clipboard: { op: 'copy' | 'move'; paths: string[] } | null
+  showHidden: boolean
+  onClose: () => void
+  onNewFolder: () => void
+  onNewFile: () => void
+  onUpload: () => void
+  onPaste: () => void
+  onRefresh: () => void
+  onToggleHidden: () => void
+}): ReactNode {
+  return (
+    <AnchorMenu anchor={rect} onClose={onClose} width={200}>
+      <div className="truncate px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-ink-faint">
+        {cwd}
+      </div>
+      <div className="my-1 h-px bg-line" />
+      <MenuItem icon={<FolderPlus size={13} />} label="New folder" onClick={onNewFolder} onClose={onClose} />
+      <MenuItem icon={<FilePlus2 size={13} />} label="New file" onClick={onNewFile} onClose={onClose} />
+      <MenuItem icon={<Upload size={13} />} label="Upload files here" onClick={onUpload} onClose={onClose} />
+      <MenuItem
+        icon={<ClipboardPaste size={13} />}
+        label={clipboard ? `Paste ${clipboard.paths.length} item(s)` : 'Paste'}
+        disabled={!clipboard}
+        onClick={onPaste}
+        onClose={onClose}
+      />
+      <div className="my-1 h-px bg-line" />
+      <MenuItem
+        icon={<Eye size={13} />}
+        label={showHidden ? 'Hide dotfiles' : 'Show dotfiles'}
+        onClick={onToggleHidden}
+        onClose={onClose}
+      />
+      <MenuItem icon={<RotateCw size={13} />} label="Refresh" onClick={onRefresh} onClose={onClose} />
+    </AnchorMenu>
+  )
+}
 
 function EntryMenu({
   entry,
@@ -694,7 +820,12 @@ function EntryMenu({
 
   return (
     <AnchorMenu anchor={rect} onClose={onClose} width={186}>
-      {!multiple && item(isDir ? <Folder size={13} /> : <FileText size={13} />, isDir ? 'Open' : 'View / edit', onOpen)}
+      {!multiple &&
+        item(
+          isDir ? <Folder size={13} /> : IMAGE_RE.test(entry.name) ? <FileImage size={13} /> : <FileText size={13} />,
+          isDir ? 'Open' : IMAGE_RE.test(entry.name) ? 'Preview' : 'View / edit',
+          onOpen
+        )}
       {!multiple && item(<Download size={13} />, isDir ? 'Download as .tar.gz' : 'Download', onDownload)}
       <div className="my-1 h-px bg-line" />
       {item(<Copy size={13} />, 'Copy', onCopy)}
@@ -773,6 +904,112 @@ function TextPrompt({
 }
 
 // --------------------------------------------------------------- file viewer
+
+const IMAGE_MIME: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  bmp: 'image/bmp',
+  ico: 'image/x-icon'
+}
+
+function imageMime(name: string): string {
+  return IMAGE_MIME[name.toLowerCase().split('.').pop() ?? ''] ?? 'image/png'
+}
+
+/** Preview for image files: pulled over SFTP and inlined as a data URL. */
+function ImageViewer({
+  server,
+  entry,
+  onClose,
+  onDownload
+}: {
+  server: Server
+  entry: RemoteEntry
+  onClose: () => void
+  onDownload: () => void
+}): ReactNode {
+  const [src, setSrc] = useState('')
+  const [size, setSize] = useState(entry.size)
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
+  const [error, setError] = useState('')
+  const [fit, setFit] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    void window.api.ops.fs.readBinary(server, entry.path).then((res) => {
+      if (cancelled) return
+      if (!res.ok || !res.data) {
+        setError(res.ok ? 'Empty response' : res.error)
+        return
+      }
+      setSize(res.data.size)
+      setSrc(`data:${imageMime(entry.name)};base64,${res.data.base64}`)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [server, entry.path, entry.name])
+
+  return (
+    <Modal title={entry.path} onClose={onClose} width={1000}>
+      <div className="flex h-[68vh] flex-col gap-2">
+        <div className="flex items-center gap-3 text-[11px] text-ink-faint">
+          <span>{formatBytes(size)}</span>
+          {dims && (
+            <span>
+              {dims.w} × {dims.h} px
+            </span>
+          )}
+          <div className="ml-auto flex items-center gap-1">
+            <ToolButton active={fit} onClick={() => setFit(true)}>
+              Fit
+            </ToolButton>
+            <ToolButton active={!fit} onClick={() => setFit(false)}>
+              1:1
+            </ToolButton>
+            <ToolButton icon={<Download size={13} />} onClick={onDownload}>
+              Download
+            </ToolButton>
+          </div>
+        </div>
+        {error ? (
+          <PanelError message={error} />
+        ) : !src ? (
+          <Loading label="Fetching image…" />
+        ) : (
+          <div
+            className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-lg border border-line p-3"
+            // Checkerboard so transparent PNGs read correctly on a dark panel.
+            style={{
+              backgroundColor: '#14161b',
+              backgroundImage:
+                'linear-gradient(45deg, #1c1f26 25%, transparent 25%), linear-gradient(-45deg, #1c1f26 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #1c1f26 75%), linear-gradient(-45deg, transparent 75%, #1c1f26 75%)',
+              backgroundSize: '16px 16px',
+              backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px'
+            }}
+          >
+            <img
+              src={src}
+              alt={entry.name}
+              draggable={false}
+              onLoad={(e) =>
+                setDims({
+                  w: e.currentTarget.naturalWidth,
+                  h: e.currentTarget.naturalHeight
+                })
+              }
+              className={cn(fit ? 'max-h-full max-w-full object-contain' : 'max-w-none')}
+            />
+          </div>
+        )}
+      </div>
+    </Modal>
+  )
+}
 
 function FileViewer({
   server,

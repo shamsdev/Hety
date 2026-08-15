@@ -25,9 +25,10 @@ import {
   Eraser,
   Pencil,
   Plus,
+  Link2,
   X
 } from 'lucide-react'
-import type { QueryResult, SchemaColumn, RowChanges } from '@shared/types'
+import type { QueryResult, SchemaColumn, RowChanges, ColumnRef } from '@shared/types'
 import { toCsv, toTsv, toMarkdown, copyText, cellString } from '../../lib/format'
 import { toast } from '../../lib/toast'
 import { Spinner, Modal, Button, cn } from '../../lib/ui'
@@ -170,7 +171,10 @@ export default function ResultsGrid({
   // ---- cell selection (single click selects; drag / shift / ctrl extend) ----
   const [ranges, setRanges] = useState<Rect[]>([])
   const [active, setActive] = useState<{ anchor: Cell; focus: Cell } | null>(null)
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; cell?: Cell } | null>(null)
+  const [related, setRelated] = useState<{ column: string; target: ColumnRef; value: unknown } | null>(
+    null
+  )
   const draggingRef = useRef(false)
   const gridRef = useRef<HTMLDivElement>(null)
   const nativePasteAt = useRef(0)
@@ -351,10 +355,12 @@ export default function ResultsGrid({
     setActive((a) => (a ? { anchor: a.anchor, focus: { r, c } } : a))
   }
 
-  const openCtxMenu = (e: ReactMouseEvent): void => {
+  /** `cell` records which cell was clicked, which can differ from the focused
+   *  one when the right click lands inside an existing multi-cell selection. */
+  const openCtxMenu = (e: ReactMouseEvent, cell?: Cell): void => {
     e.preventDefault()
     gridRef.current?.focus()
-    setCtxMenu({ x: e.clientX, y: e.clientY })
+    setCtxMenu({ x: e.clientX, y: e.clientY, cell })
   }
 
   // ---- clipboard ----
@@ -758,7 +764,7 @@ export default function ResultsGrid({
         onMouseDown={(e) => onCellMouseDown(e, r, c)}
         onMouseEnter={() => onCellMouseEnter(r, c)}
         onDoubleClick={() => beginEdit(r, c)}
-        onContextMenu={openCtxMenu}
+        onContextMenu={(e) => openCtxMenu(e, { r, c })}
       >
         {editingHere ? (
           <CellEditor
@@ -787,7 +793,29 @@ export default function ResultsGrid({
   const menuItems = (): MenuEntry[] => {
     const rows = selectedRowList()
     const anyMarked = rows.some((r) => !isNewRow(r) && deleted.has(r))
+
+    // Foreign-key lookup for the clicked cell (column metadata only exists when
+    // the console was opened from a table, which is also where the connection is).
+    const cell = ctxMenu?.cell ?? active?.focus
+    const fkColumn = cell ? columns[cell.c] : undefined
+    const fk = fkColumn ? meta.byName.get(fkColumn)?.ref : undefined
+    const fkValue = cell && fk ? displayValue(cell.r, cell.c) : null
+    const fkItems: MenuEntry[] =
+      fk && fkColumn && editContext
+        ? [
+            {
+              label: 'See related row',
+              hint: `${fk.table}.${fk.column}`,
+              icon: <Link2 size={13} />,
+              disabled: fkValue === null || fkValue === undefined,
+              onClick: () => setRelated({ column: fkColumn, target: fk, value: fkValue })
+            },
+            { separator: true }
+          ]
+        : []
+
     return [
+      ...fkItems,
       {
         label: 'Copy',
         hint: 'Ctrl+C',
@@ -954,6 +982,10 @@ export default function ResultsGrid({
                 {columns.map((c, i) => {
                   const col = meta.byName.get(c)
                   const sorted = sort && sort.column === c ? sort.dir : null
+                  const fk = col?.ref
+                  const fkText = fk
+                    ? ` · → ${fk.schema ? `${fk.schema}.` : ''}${fk.table}.${fk.column}`
+                    : ''
                   return (
                     <th
                       key={i}
@@ -963,15 +995,16 @@ export default function ResultsGrid({
                       )}
                       title={
                         onSort
-                          ? `${col ? `${c} · ${col.type}${col.pk ? ' · PK' : ''}` : c} · click to sort`
+                          ? `${col ? `${c} · ${col.type}${col.pk ? ' · PK' : ''}${fkText}` : c} · click to sort`
                           : col
-                            ? `${c} · ${col.type}${col.pk ? ' · PK' : ''}`
+                            ? `${c} · ${col.type}${col.pk ? ' · PK' : ''}${fkText}`
                             : c
                       }
                       onClick={onSort ? () => onSort(c) : undefined}
                     >
                       <span className="inline-flex items-center gap-1">
                         {col?.pk && <span className="text-warn">🔑</span>}
+                        {fk && <Link2 size={11} className="text-accent" />}
                         {c}
                         {sorted === 'asc' && <ArrowUp size={12} className="text-accent" />}
                         {sorted === 'desc' && <ArrowDown size={12} className="text-accent" />}
@@ -1065,6 +1098,16 @@ export default function ResultsGrid({
         <GridMenu x={ctxMenu.x} y={ctxMenu.y} items={menuItems()} onClose={() => setCtxMenu(null)} />
       )}
 
+      {related && editContext && (
+        <RelatedRowModal
+          connectionId={editContext.connectionId}
+          column={related.column}
+          target={related.target}
+          value={related.value}
+          onClose={() => setRelated(null)}
+        />
+      )}
+
       {jsonEdit && (
         <JsonEditorModal
           column={columns[jsonEdit.c]}
@@ -1103,7 +1146,7 @@ function GridMenu({
   items: MenuEntry[]
   onClose: () => void
 }): ReactNode {
-  const width = 200
+  const width = 220
   const left = Math.min(x, window.innerWidth - width - 8)
   const top = Math.min(y, window.innerHeight - items.length * 28 - 16)
   return (
@@ -1137,13 +1180,124 @@ function GridMenu({
               }}
             >
               <span className="w-4 shrink-0 text-ink-faint">{it.icon}</span>
-              <span className="flex-1">{it.label}</span>
-              {it.hint && <span className="text-[10px] text-ink-faint">{it.hint}</span>}
+              <span className="flex-1 whitespace-nowrap">{it.label}</span>
+              {it.hint && (
+                <span className="max-w-[84px] truncate text-[10px] text-ink-faint">{it.hint}</span>
+              )}
             </button>
           )
         )}
       </div>
     </>
+  )
+}
+
+/** Shows the row a foreign-key cell points at, one field per line. */
+function RelatedRowModal({
+  connectionId,
+  column,
+  target,
+  value,
+  onClose
+}: {
+  connectionId: string
+  column: string
+  target: ColumnRef
+  value: unknown
+  onClose: () => void
+}): ReactNode {
+  const [result, setResult] = useState<QueryResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const qualified = target.schema ? `${target.schema}.${target.table}` : target.table
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    setResult(null)
+    void window.api.db.relatedRows(connectionId, target, value, 20).then((r) => {
+      if (cancelled) return
+      setLoading(false)
+      if (r.ok && r.data) setResult(r.data)
+      else setError(r.ok ? 'No data' : r.error)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [connectionId, target, value])
+
+  const copyRow = async (row: unknown[]): Promise<void> => {
+    if (!result) return
+    await copyText(result.columns.map((c, i) => `${c}\t${cellString(row[i])}`).join('\n'))
+    toast.success('Row copied')
+  }
+
+  return (
+    <Modal title={`Related row · ${qualified}`} width={620} onClose={onClose}>
+      <div className="space-y-3">
+        <div className="font-mono text-[11px] text-ink-faint">
+          {column} → {qualified}.{target.column} = {cellString(value)}
+        </div>
+
+        {loading ? (
+          <div className="flex items-center gap-2 py-6 text-xs text-ink-soft">
+            <Spinner /> Loading…
+          </div>
+        ) : error ? (
+          <div className="rounded-md bg-bad/10 px-3 py-2 text-xs text-bad">{error}</div>
+        ) : !result || result.rowCount === 0 ? (
+          <div className="rounded-md bg-bg-elevated px-3 py-2 text-xs text-ink-faint">
+            No matching row in {qualified}.
+          </div>
+        ) : (
+          <div className="max-h-[420px] space-y-3 overflow-auto">
+            {result.rows.map((row, i) => (
+              <div key={i} className="overflow-hidden rounded-md border border-line">
+                {result.rows.length > 1 && (
+                  <div className="border-b border-line bg-bg-elevated px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-ink-faint">
+                    Row {i + 1} of {result.rows.length}
+                  </div>
+                )}
+                <table className="w-full text-[12px]">
+                  <tbody>
+                    {result.columns.map((c, ci) => (
+                      <tr key={c} className="border-b border-line/60 last:border-b-0">
+                        <td className="w-[35%] whitespace-nowrap bg-bg-panel px-3 py-1 align-top font-semibold text-ink-soft">
+                          {c}
+                        </td>
+                        <td className="break-all px-3 py-1 font-mono">
+                          {row[ci] === null ? (
+                            <span className="italic text-ink-faint">null</span>
+                          ) : (
+                            cellString(row[ci])
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="flex justify-end border-t border-line bg-bg-panel px-2 py-1">
+                  <button
+                    className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-faint hover:bg-bg-hover hover:text-ink"
+                    onClick={() => void copyRow(row)}
+                  >
+                    <Copy size={11} /> Copy
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex justify-end">
+          <Button variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </div>
+    </Modal>
   )
 }
 

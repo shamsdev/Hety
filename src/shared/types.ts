@@ -12,6 +12,11 @@ export interface Server {
   password?: string
   keyPath?: string
   keyPassphrase?: string
+  /**
+   * Password for `sudo` on this host, used by the Remote tab for privileged
+   * actions. Falls back to `password` when empty.
+   */
+  sudoPassword?: string
   /** optional accent color (hex) to flag e.g. production. */
   color?: string
 }
@@ -111,10 +116,20 @@ export interface QueryResult {
   command?: string
 }
 
+/** The column a foreign key points at. */
+export interface ColumnRef {
+  /** owning schema; omitted for engines with a single namespace. */
+  schema?: string
+  table: string
+  column: string
+}
+
 export interface SchemaColumn {
   name: string
   type: string
   pk: boolean
+  /** set when the column is a foreign key, naming the referenced column. */
+  ref?: ColumnRef
 }
 export interface SchemaTable {
   name: string
@@ -238,6 +253,14 @@ export interface RemoteFile {
   truncated: boolean
   /** true when the content looks binary (rendered read-only). */
   binary: boolean
+}
+
+export interface RemoteBinary {
+  path: string
+  /** base64 payload, capped at 16 MB. */
+  base64: string
+  size: number
+  truncated: boolean
 }
 
 export interface RemoteExec {

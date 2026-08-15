@@ -74,6 +74,10 @@ export async function createClickHouse(p: ConnectParams): Promise<DbDriver> {
       return { columns: [], rows: [], rowCount: 0, command: 'OK' }
     },
     introspect: () => introspect(client, p.database),
+    lookupRows: async (): Promise<RawResult> => {
+      // ClickHouse has no foreign keys, so nothing ever references a row here.
+      throw new Error('Foreign keys are not supported for ClickHouse.')
+    },
     applyChanges: async (): Promise<{ inserted: number; updated: number; deleted: number }> => {
       throw new Error('Row editing is not supported for ClickHouse.')
     },

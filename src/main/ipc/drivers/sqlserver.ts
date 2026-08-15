@@ -1,5 +1,5 @@
 import sql from 'mssql'
-import type { DbSchema, SchemaNamespace, SchemaTable, RowChanges } from '@shared/types'
+import type { ColumnRef, DbSchema, SchemaNamespace, SchemaTable, RowChanges } from '@shared/types'
 import type { ConnectParams, DbDriver, RawResult } from './types'
 
 const q = (name: string): string => '[' + name.replace(/]/g, ']]') + ']'
@@ -42,6 +42,28 @@ async function introspect(pool: sql.ConnectionPool): Promise<DbSchema> {
   )
   for (const r of pkRows.recordset) pks.add(`${r.s}.${r.t}.${r.c}`)
 
+  const fks = new Map<string, ColumnRef>()
+  const fkRows = await pool.request().query<{
+    s: string
+    t: string
+    c: string
+    fs: string
+    ft: string
+    fc: string
+  }>(
+    `SELECT SCHEMA_NAME(pt.schema_id) AS s, pt.name AS t, pc.name AS c,
+            SCHEMA_NAME(rt.schema_id) AS fs, rt.name AS ft, rc.name AS fc
+     FROM sys.foreign_key_columns fkc
+     JOIN sys.tables pt ON pt.object_id = fkc.parent_object_id
+     JOIN sys.columns pc ON pc.object_id = fkc.parent_object_id
+       AND pc.column_id = fkc.parent_column_id
+     JOIN sys.tables rt ON rt.object_id = fkc.referenced_object_id
+     JOIN sys.columns rc ON rc.object_id = fkc.referenced_object_id
+       AND rc.column_id = fkc.referenced_column_id`
+  )
+  for (const r of fkRows.recordset)
+    fks.set(`${r.s}.${r.t}.${r.c}`, { schema: r.fs, table: r.ft, column: r.fc })
+
   const cols = await pool.request().query<{ s: string; t: string; c: string; d: string }>(
     `SELECT TABLE_SCHEMA AS s, TABLE_NAME AS t, COLUMN_NAME AS c, DATA_TYPE AS d
      FROM INFORMATION_SCHEMA.COLUMNS ORDER BY ORDINAL_POSITION`
@@ -50,7 +72,8 @@ async function introspect(pool: sql.ConnectionPool): Promise<DbSchema> {
     index.get(`${r.s}.${r.t}`)?.columns.push({
       name: r.c,
       type: r.d,
-      pk: pks.has(`${r.s}.${r.t}.${r.c}`)
+      pk: pks.has(`${r.s}.${r.t}.${r.c}`),
+      ref: fks.get(`${r.s}.${r.t}.${r.c}`)
     })
   }
 
@@ -170,6 +193,26 @@ export async function createSqlServer(p: ConnectParams): Promise<DbDriver> {
       return { columns: [], rows: [], rowCount: sumAffected(res.rowsAffected), command: 'OK' }
     },
     introspect: () => introspect(pool),
+    lookupRows: async (ref, value, limit): Promise<RawResult> => {
+      const target = ref.schema ? `${q(ref.schema)}.${q(ref.table)}` : q(ref.table)
+      const req = pool.request()
+      req.arrayRowMode = true
+      req.input('p0', value)
+      const res = await req.query(
+        `SELECT TOP ${Number(limit) || 1} * FROM ${target} WHERE ${q(ref.column)} = @p0`
+      )
+      const withMeta = res as unknown as { columns?: Array<Array<{ name?: string }>> }
+      const recordset = (res.recordset as unknown as unknown[][] | undefined) ?? []
+      const meta = (Array.isArray(withMeta.columns) ? withMeta.columns[0] : undefined) as
+        | Array<{ name?: string }>
+        | undefined
+      const width = recordset[0]?.length ?? meta?.length ?? 0
+      return {
+        columns: Array.from({ length: width }, (_, i) => meta?.[i]?.name || `col${i + 1}`),
+        rows: recordset,
+        rowCount: recordset.length
+      }
+    },
     applyChanges: (table, changes) => applyChanges(pool, table, changes),
     setReadOnly: async (): Promise<void> => {
       // No session-wide read-only toggle; the app-level lock disables grid edits.

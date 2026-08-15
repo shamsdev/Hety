@@ -1,6 +1,8 @@
 import { Client, types as pgTypes } from 'pg'
-import type { DbSchema, SchemaNamespace, RowChanges } from '@shared/types'
+import type { ColumnRef, DbSchema, SchemaNamespace, RowChanges } from '@shared/types'
 import type { ConnectParams, DbDriver, RawResult } from './types'
+
+const q = (name: string): string => '"' + name.replace(/"/g, '""') + '"'
 
 // Return date/time values as the raw DB text instead of JS Date, so timestamps
 // aren't silently shifted by the local timezone before they reach the grid.
@@ -51,6 +53,31 @@ async function introspect(client: Client): Promise<DbSchema> {
   )
   for (const r of pkRows.rows) pks.add(`${r.s}.${r.t}.${r.c}`)
 
+  // Foreign keys, matched through the referenced unique constraint so that
+  // composite keys line their columns up in the right order.
+  const fks = new Map<string, ColumnRef>()
+  const fkRows = await client.query<{
+    s: string
+    t: string
+    c: string
+    fs: string
+    ft: string
+    fc: string
+  }>(
+    `SELECT kcu.table_schema AS s, kcu.table_name AS t, kcu.column_name AS c,
+            ref.table_schema AS fs, ref.table_name AS ft, ref.column_name AS fc
+     FROM information_schema.referential_constraints rc
+     JOIN information_schema.key_column_usage kcu
+       ON kcu.constraint_name = rc.constraint_name
+      AND kcu.constraint_schema = rc.constraint_schema
+     JOIN information_schema.key_column_usage ref
+       ON ref.constraint_name = rc.unique_constraint_name
+      AND ref.constraint_schema = rc.unique_constraint_schema
+      AND ref.ordinal_position = kcu.position_in_unique_constraint`
+  )
+  for (const r of fkRows.rows)
+    fks.set(`${r.s}.${r.t}.${r.c}`, { schema: r.fs, table: r.ft, column: r.fc })
+
   const cols = await client.query<{ s: string; t: string; c: string; d: string }>(
     `SELECT table_schema AS s, table_name AS t, column_name AS c, data_type AS d
      FROM information_schema.columns
@@ -60,10 +87,18 @@ async function introspect(client: Client): Promise<DbSchema> {
   for (const r of cols.rows) {
     const obj = tableIndex.get(`${r.s}.${r.t}`)
     if (obj)
-      (obj.columns as unknown as { name: string; type: string; pk: boolean }[]).push({
+      (
+        obj.columns as unknown as {
+          name: string
+          type: string
+          pk: boolean
+          ref?: ColumnRef
+        }[]
+      ).push({
         name: r.c,
         type: r.d,
-        pk: pks.has(`${r.s}.${r.t}.${r.c}`)
+        pk: pks.has(`${r.s}.${r.t}.${r.c}`),
+        ref: fks.get(`${r.s}.${r.t}.${r.c}`)
       })
   }
 
@@ -189,6 +224,19 @@ export async function createPostgres(p: ConnectParams): Promise<DbDriver> {
       }
     },
     introspect: () => introspect(client),
+    lookupRows: async (ref, value, limit): Promise<RawResult> => {
+      const target = ref.schema ? `${q(ref.schema)}.${q(ref.table)}` : q(ref.table)
+      const res = await client.query<unknown[]>({
+        text: `SELECT * FROM ${target} WHERE ${q(ref.column)} = $1 LIMIT ${Number(limit) || 1}`,
+        values: [value],
+        rowMode: 'array'
+      })
+      return {
+        columns: (res.fields ?? []).map((f) => f.name),
+        rows: (res.rows ?? []) as unknown[][],
+        rowCount: res.rows?.length ?? 0
+      }
+    },
     applyChanges: (table, changes) => applyChanges(client, table, changes),
     setReadOnly: async (readOnly): Promise<void> => {
       await client.query(`SET SESSION default_transaction_read_only = ${readOnly ? 'on' : 'off'}`)
