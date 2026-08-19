@@ -1,17 +1,26 @@
 import { useState, type ReactNode } from 'react'
-import { ChevronLeft, Terminal, GitBranch, Database as DbIcon, Columns3, Pencil, Trash2 } from 'lucide-react'
-import { useApp } from '../store'
+import {
+  ChevronLeft,
+  Terminal,
+  GitBranch,
+  Database as DbIcon,
+  Columns3,
+  Pencil,
+  Trash2,
+  ServerCog
+} from 'lucide-react'
+import { useApp, type WorkspaceTab } from '../store'
 import { cn, ProjectIcon, StatusDot } from '../lib/ui'
 import SshPanel from './ssh/SshPanel'
+import OpsPanel from './ops/OpsPanel'
 import RepoPanel from './repo/RepoPanel'
 import DbPanel from './db/DbPanel'
 import BoardPanel from './board/BoardPanel'
 import ProjectDialog from './dialogs/ProjectDialog'
 
-type Tab = 'ssh' | 'repo' | 'db' | 'board'
-
-const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
+const TABS: { id: WorkspaceTab; label: string; icon: ReactNode }[] = [
   { id: 'ssh', label: 'SSH', icon: <Terminal size={15} /> },
+  { id: 'ops', label: 'Remote', icon: <ServerCog size={15} /> },
   { id: 'repo', label: 'Repository', icon: <GitBranch size={15} /> },
   { id: 'db', label: 'Database', icon: <DbIcon size={15} /> },
   { id: 'board', label: 'Planning', icon: <Columns3 size={15} /> }
@@ -31,7 +40,10 @@ export default function Workspace({
   const deleteProject = useApp((s) => s.deleteProject)
   const sshLive = useApp((s) => (s.liveSsh[projectId]?.length ?? 0) > 0)
   const dbLive = useApp((s) => (s.liveDb[projectId]?.length ?? 0) > 0)
-  const [tab, setTab] = useState<Tab>('ssh')
+  // Lives in the store so the command palette can jump straight to a tab.
+  const tab = useApp((s) => s.activeTab[projectId] ?? 'ssh')
+  const setActiveTab = useApp((s) => s.setActiveTab)
+  const setTab = (t: WorkspaceTab): void => setActiveTab(projectId, t)
   const [editing, setEditing] = useState(false)
 
   if (!project) return null
@@ -118,6 +130,9 @@ export default function Workspace({
       <div className="min-h-0 flex-1">
         <div className={cn('h-full', tab === 'ssh' ? 'block' : 'hidden')}>
           <SshPanel project={project} visible={visible && tab === 'ssh'} />
+        </div>
+        <div className={cn('h-full', tab === 'ops' ? 'block' : 'hidden')}>
+          <OpsPanel project={project} visible={visible && tab === 'ops'} />
         </div>
         <div className={cn('h-full', tab === 'repo' ? 'block' : 'hidden')}>
           <RepoPanel project={project} />

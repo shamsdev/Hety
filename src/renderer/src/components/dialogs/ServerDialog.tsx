@@ -25,11 +25,14 @@ export default function ServerDialog({
   const [password, setPassword] = useState(server?.password ?? '')
   const [keyPath, setKeyPath] = useState(server?.keyPath ?? '')
   const [keyPassphrase, setKeyPassphrase] = useState(server?.keyPassphrase ?? '')
+  const [sudoPassword, setSudoPassword] = useState(server?.sudoPassword ?? '')
   const [color, setColor] = useState<string | undefined>(server?.color)
 
   const save = (): void => {
     if (!name.trim() || !host.trim()) return
     upsertServer(projectId, {
+      // Spread first so fields this form doesn't edit (snippets) survive a save.
+      ...server,
       id: server?.id ?? newId(),
       name: name.trim(),
       host: host.trim(),
@@ -39,6 +42,7 @@ export default function ServerDialog({
       password,
       keyPath,
       keyPassphrase,
+      sudoPassword,
       color
     })
     onClose()
@@ -59,7 +63,8 @@ export default function ServerDialog({
       authType,
       password,
       keyPath,
-      keyPassphrase
+      keyPassphrase,
+      sudoPassword
     }
     await copyText(JSON.stringify(config, null, 2))
     toast.success('Server config copied to clipboard')
@@ -77,6 +82,7 @@ export default function ServerDialog({
       if (typeof c.password === 'string') setPassword(c.password)
       if (typeof c.keyPath === 'string') setKeyPath(c.keyPath)
       if (typeof c.keyPassphrase === 'string') setKeyPassphrase(c.keyPassphrase)
+      if (typeof c.sudoPassword === 'string') setSudoPassword(c.sudoPassword)
       toast.success('Server config pasted from clipboard')
     } catch {
       toast.error('Clipboard does not contain a valid server config')
@@ -146,6 +152,17 @@ export default function ServerDialog({
             </Field>
           </>
         )}
+
+        <Field
+          label="Sudo password (optional)"
+          hint="Used by the Remote tab for root-only actions — firewall rules, services, protected files. Leave empty to reuse the login password, or if this account is root / passwordless sudo."
+        >
+          <PasswordInput
+            placeholder={authType === 'password' && password ? 'Same as login password' : ''}
+            value={sudoPassword}
+            onChange={(e) => setSudoPassword(e.target.value)}
+          />
+        </Field>
 
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="ghost" onClick={onClose}>

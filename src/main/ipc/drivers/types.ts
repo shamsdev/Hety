@@ -1,4 +1,4 @@
-import type { DbSchema, RowChanges } from '@shared/types'
+import type { ColumnRef, DbSchema, RowChanges } from '@shared/types'
 
 /** Raw query output from a driver, before cell-value normalisation. */
 export interface RawResult {
@@ -12,6 +12,8 @@ export interface RawResult {
 export interface DbDriver {
   query(sql: string): Promise<RawResult>
   introspect(): Promise<DbSchema>
+  /** Fetch the row(s) a foreign-key value points at. Identifiers are quoted by the driver. */
+  lookupRows(ref: ColumnRef, value: unknown, limit: number): Promise<RawResult>
   applyChanges(
     table: string,
     changes: RowChanges

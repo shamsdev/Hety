@@ -3,7 +3,15 @@ import net from 'node:net'
 import { randomUUID } from 'node:crypto'
 import { Client as SshClient } from 'ssh2'
 import { connectConfig } from './ssh'
-import type { Database, Server, Result, QueryResult, DbSchema, RowChanges } from '@shared/types'
+import type {
+  Database,
+  Server,
+  Result,
+  QueryResult,
+  DbSchema,
+  RowChanges,
+  ColumnRef
+} from '@shared/types'
 import { getDatabaseKindInfo } from '@shared/databases'
 import { createDriver, type DbDriver } from './drivers'
 
@@ -190,6 +198,32 @@ export function registerDbIpc(): void {
             rowCount: raw.rowCount,
             elapsedMs,
             command: raw.command
+          }
+        }
+      } catch (e) {
+        return { ok: false, error: (e as Error).message }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'db:relatedRows',
+    async (
+      _e,
+      { id, ref, value, limit }: { id: string; ref: ColumnRef; value: unknown; limit?: number }
+    ): Promise<Result<QueryResult>> => {
+      const conn = connections.get(id)
+      if (!conn) return { ok: false, error: 'Not connected.' }
+      try {
+        const start = Date.now()
+        const raw = await conn.driver.lookupRows(ref, value, Math.min(limit ?? 20, 200))
+        return {
+          ok: true,
+          data: {
+            columns: raw.columns,
+            rows: raw.rows.map((row) => row.map(cellToValue)),
+            rowCount: raw.rowCount,
+            elapsedMs: Date.now() - start
           }
         }
       } catch (e) {

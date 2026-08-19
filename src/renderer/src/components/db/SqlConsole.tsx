@@ -2,25 +2,25 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { basicSetup } from 'codemirror'
 import { EditorView, keymap } from '@codemirror/view'
 import { Compartment } from '@codemirror/state'
-import { sql, PostgreSQL } from '@codemirror/lang-sql'
+import { autocompletion, startCompletion } from '@codemirror/autocomplete'
+import { sql, type SQLConfig } from '@codemirror/lang-sql'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { Play, Save } from 'lucide-react'
 import type { DbSchema, QueryResult, SchemaColumn } from '@shared/types'
+import type { DatabaseKind } from '@shared/databases'
 import ResultsGrid from './ResultsGrid'
 import { Modal, Button, Input } from '../../lib/ui'
 import { ResizeHandle, usePersistedSize } from '../../lib/resize'
+import { buildSqlNamespace, defaultSchemaFor, sqlDialectFor } from '../../lib/sqlCompletion'
 
 export type SortState = { column: string; dir: 'asc' | 'desc' } | null
 
-function buildSchema(schema?: DbSchema): Record<string, string[]> {
-  const out: Record<string, string[]> = {}
-  if (!schema) return out
-  for (const ns of schema.schemas) {
-    for (const t of [...ns.tables, ...ns.views]) {
-      out[t.name] = t.columns.map((c) => c.name)
-    }
-  }
-  return out
+export interface EditTable {
+  /** fully quoted `schema.table`, used when writing changes back. */
+  table: string
+  /** bare table name, completed without a prefix inside this console. */
+  name?: string
+  columns: SchemaColumn[]
 }
 
 /** Rewrite a SELECT to sort by `column` (or remove sorting when dir is null),
@@ -48,21 +48,28 @@ function applySort(sql: string, column: string, dir: 'asc' | 'desc' | null): str
 export default function SqlConsole({
   connectionId,
   connected,
+  kind,
+  dbName,
   schema,
   initialSql,
   autorun,
   editTable,
   locked,
-  onSave
+  onSave,
+  onExecuted
 }: {
   connectionId: string | null
   connected: boolean
+  kind?: DatabaseKind | string
+  dbName?: string
   schema?: DbSchema
   initialSql?: string
   autorun?: boolean
-  editTable?: { table: string; columns: SchemaColumn[] }
+  editTable?: EditTable
   locked?: boolean
   onSave: (name: string, sql: string) => void
+  /** Called after every run, successful or not, so it can be logged to history. */
+  onExecuted?: (run: { sql: string; elapsedMs: number; rowCount?: number; error?: string }) => void
 }): ReactNode {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -70,6 +77,8 @@ export default function SqlConsole({
   const runRef = useRef<() => void>(() => undefined)
   const connRef = useRef(connectionId)
   connRef.current = connectionId
+  const onExecutedRef = useRef(onExecuted)
+  onExecutedRef.current = onExecuted
 
   const [result, setResult] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -85,6 +94,7 @@ export default function SqlConsole({
     if (!text) return
     setRunning(true)
     setError(null)
+    const startedAt = Date.now()
     const r = await window.api.db.query(connRef.current, text)
     setRunning(false)
     if (r.ok && r.data) {
@@ -93,6 +103,15 @@ export default function SqlConsole({
     } else {
       setError(r.ok ? 'No data' : r.error)
     }
+    // The driver times the statement itself; wall time is the fallback for
+    // failures, which come back without a result.
+    const failure = r.ok && r.data ? undefined : r.ok ? 'No data' : r.error
+    onExecutedRef.current?.({
+      sql: text,
+      elapsedMs: r.ok && r.data ? r.data.elapsedMs : Date.now() - startedAt,
+      rowCount: r.ok && r.data ? r.data.rowCount : undefined,
+      error: failure
+    })
   }
 
   const run = (): void => {
@@ -119,6 +138,15 @@ export default function SqlConsole({
     void execute(next)
   }
 
+  // Completion sources: schema-aware tables/columns for the connected dialect.
+  const sqlConfig = (): SQLConfig => ({
+    dialect: sqlDialectFor(kind),
+    schema: buildSqlNamespace(schema),
+    defaultSchema: defaultSchemaFor(kind, dbName, schema),
+    defaultTable: editTable?.name,
+    upperCaseKeywords: true
+  })
+
   // create editor once
   useEffect(() => {
     if (!hostRef.current) return
@@ -128,9 +156,8 @@ export default function SqlConsole({
       extensions: [
         basicSetup,
         oneDark,
-        langRef.current.of(
-          sql({ dialect: PostgreSQL, schema: buildSchema(schema), upperCaseKeywords: true })
-        ),
+        langRef.current.of(sql(sqlConfig())),
+        autocompletion({ activateOnTyping: true, icons: true, defaultKeymap: true }),
         keymap.of([
           {
             key: 'Mod-Enter',
@@ -139,7 +166,10 @@ export default function SqlConsole({
               runRef.current()
               return true
             }
-          }
+          },
+          // JetBrains-style explicit completion trigger.
+          { key: 'Ctrl-Space', preventDefault: true, run: startCompletion },
+          { key: 'Alt-Space', preventDefault: true, run: startCompletion }
         ]),
         EditorView.theme({
           '&': { height: '100%', backgroundColor: '#0e0f13' },
@@ -160,16 +190,13 @@ export default function SqlConsole({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // reconfigure language when schema arrives
+  // reconfigure language when the schema arrives or the connection changes
   useEffect(() => {
     const view = viewRef.current
     if (!view) return
-    view.dispatch({
-      effects: langRef.current.reconfigure(
-        sql({ dialect: PostgreSQL, schema: buildSchema(schema), upperCaseKeywords: true })
-      )
-    })
-  }, [schema])
+    view.dispatch({ effects: langRef.current.reconfigure(sql(sqlConfig())) })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schema, kind, dbName, editTable?.name])
 
   const openSave = (): void => {
     const view = viewRef.current

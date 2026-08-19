@@ -11,7 +11,7 @@ import {
   Search,
   Database as DbIcon
 } from 'lucide-react'
-import type { DbSchema, SchemaTable, SchemaEnum } from '@shared/types'
+import type { DbSchema, SchemaTable, SchemaEnum, SchemaColumn } from '@shared/types'
 import type { DatabaseKind } from '@shared/databases'
 import { quoteIdent, quoteQualified } from '@shared/sql'
 
@@ -68,9 +68,11 @@ export default function SchemaTree({
 
   const q = filter.toLowerCase().trim()
   const forceOpen = q.length > 0
-  const tableMatch = (t: SchemaTable): boolean =>
-    !q || t.name.toLowerCase().includes(q) || t.columns.some((c) => c.name.toLowerCase().includes(q))
   const nameMatch = (n: string): boolean => !q || n.toLowerCase().includes(q)
+  const matchingColumns = (t: SchemaTable): SchemaColumn[] =>
+    q ? t.columns.filter((c) => c.name.toLowerCase().includes(q)) : []
+  const tableMatch = (t: SchemaTable): boolean =>
+    !q || t.name.toLowerCase().includes(q) || matchingColumns(t).length > 0
 
   const toggle = (k: string): void =>
     setOpen((s) => {
@@ -78,7 +80,23 @@ export default function SchemaTree({
       n.has(k) ? n.delete(k) : n.add(k)
       return n
     })
+  /** Containers (database / schema / folders) auto-expand while filtering… */
   const isOpen = (k: string): boolean => forceOpen || open.has(k)
+  /** …but tables and enums only expand when the user asks for it, so a search
+   *  doesn't dump every column of every matching table into the tree. */
+  const isLeafOpen = (k: string): boolean => open.has(k)
+
+  /** Columns to list under a table: the matches when a search hit only columns,
+   *  otherwise everything (once the node is expanded by hand). */
+  const tableNodeState = (
+    key: string,
+    t: SchemaTable
+  ): { open: boolean; columns: SchemaColumn[] } => {
+    const manual = isLeafOpen(key)
+    if (manual) return { open: true, columns: t.columns }
+    const hits = q && !t.name.toLowerCase().includes(q) ? matchingColumns(t) : []
+    return { open: hits.length > 0, columns: hits }
+  }
 
   const openMenu = (e: MouseEvent, items: MenuItem[]): void => {
     e.preventDefault()
@@ -125,18 +143,23 @@ export default function SchemaTree({
                   open={isOpen(`f:${s.name}:tables`)}
                   onToggle={() => toggle(`f:${s.name}:tables`)}
                 >
-                  {tables.map((t) => (
-                    <TableNode
-                      key={t.name}
-                      table={t}
-                      depth={single ? 2 : 3}
-                      open={isOpen(`t:${s.name}:${t.name}`)}
-                      onToggle={() => toggle(`t:${s.name}:${t.name}`)}
-                      onOpen={() => onOpenTable(s.name, t)}
-                      onContext={(e) => openMenu(e, tableMenu(t))}
-                      icon={<Table2 size={13} className="text-accent" />}
-                    />
-                  ))}
+                  {tables.map((t) => {
+                    const key = `t:${s.name}:${t.name}`
+                    const st = tableNodeState(key, t)
+                    return (
+                      <TableNode
+                        key={t.name}
+                        table={t}
+                        depth={single ? 2 : 3}
+                        open={st.open}
+                        columns={st.columns}
+                        onToggle={() => toggle(key)}
+                        onOpen={() => onOpenTable(s.name, t)}
+                        onContext={(e) => openMenu(e, tableMenu(t))}
+                        icon={<Table2 size={13} className="text-accent" />}
+                      />
+                    )
+                  })}
                 </Folder2>
               )}
               {views.length > 0 && (
@@ -146,18 +169,23 @@ export default function SchemaTree({
                   open={isOpen(`f:${s.name}:views`)}
                   onToggle={() => toggle(`f:${s.name}:views`)}
                 >
-                  {views.map((t) => (
-                    <TableNode
-                      key={t.name}
-                      table={t}
-                      depth={single ? 2 : 3}
-                      open={isOpen(`v:${s.name}:${t.name}`)}
-                      onToggle={() => toggle(`v:${s.name}:${t.name}`)}
-                      onOpen={() => onOpenTable(s.name, t)}
-                      onContext={(e) => openMenu(e, tableMenu(t))}
-                      icon={<Eye size={13} className="text-ink-soft" />}
-                    />
-                  ))}
+                  {views.map((t) => {
+                    const key = `v:${s.name}:${t.name}`
+                    const st = tableNodeState(key, t)
+                    return (
+                      <TableNode
+                        key={t.name}
+                        table={t}
+                        depth={single ? 2 : 3}
+                        open={st.open}
+                        columns={st.columns}
+                        onToggle={() => toggle(key)}
+                        onOpen={() => onOpenTable(s.name, t)}
+                        onContext={(e) => openMenu(e, tableMenu(t))}
+                        icon={<Eye size={13} className="text-ink-soft" />}
+                      />
+                    )
+                  })}
                 </Folder2>
               )}
               {enums.length > 0 && (
@@ -173,7 +201,7 @@ export default function SchemaTree({
                       <div key={e.name}>
                         <Row
                           depth={single ? 2 : 3}
-                          open={isOpen(ek)}
+                          open={isLeafOpen(ek)}
                           onToggle={() => toggle(ek)}
                           onContext={(ev) =>
                             openMenu(ev, [
@@ -184,7 +212,7 @@ export default function SchemaTree({
                           icon={<Tags size={13} className="text-warn" />}
                           label={e.name}
                         />
-                        {isOpen(ek) &&
+                        {isLeafOpen(ek) &&
                           e.values.map((v) => (
                             <Row key={v} depth={single ? 3 : 4} leaf icon={<Circle size={6} />} label={v} muted />
                           ))}
@@ -261,6 +289,7 @@ function TableNode({
   table,
   depth,
   open,
+  columns,
   onToggle,
   onOpen,
   onContext,
@@ -269,6 +298,8 @@ function TableNode({
   table: SchemaTable
   depth: number
   open: boolean
+  /** columns to render when expanded (a filtered subset while searching). */
+  columns: SchemaColumn[]
   onToggle: () => void
   onOpen: () => void
   onContext: (e: MouseEvent) => void
@@ -286,7 +317,7 @@ function TableNode({
         label={table.name}
       />
       {open &&
-        table.columns.map((c) => (
+        columns.map((c) => (
           <Row
             key={c.name}
             depth={depth + 1}

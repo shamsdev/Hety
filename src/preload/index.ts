@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   AppData,
   Server,
@@ -6,13 +6,25 @@ import type {
   Result,
   QueryResult,
   DbSchema,
+  ColumnRef,
   GitStatus,
   GitCommit,
   GitGraphCommit,
   GitFile,
   GitStash,
   MergeMode,
-  RowChanges
+  RowChanges,
+  RemoteHostInfo,
+  RemoteListing,
+  RemoteFile,
+  RemoteBinary,
+  RemoteExec,
+  RemoteMetrics,
+  SecurityReport,
+  UpdateReport,
+  ServiceUnit,
+  DockerReport,
+  TransferProgress
 } from '@shared/types'
 
 type SshStatus = { id: string; status: 'connected' | 'closed' | 'error'; message?: string }
@@ -58,6 +70,13 @@ const api = {
       ipcRenderer.invoke('db:query', { id, sql }),
     introspect: (id: string): Promise<Result<DbSchema>> =>
       ipcRenderer.invoke('db:introspect', { id }),
+    relatedRows: (
+      id: string,
+      ref: ColumnRef,
+      value: unknown,
+      limit?: number
+    ): Promise<Result<QueryResult>> =>
+      ipcRenderer.invoke('db:relatedRows', { id, ref, value, limit }),
     applyChanges: (
       id: string,
       table: string,
@@ -145,6 +164,118 @@ const api = {
       ipcRenderer.invoke('git:deleteTag', { path, name }),
     clone: (url: string, directory: string, name: string): Promise<Result<string>> =>
       ipcRenderer.invoke('git:clone', { url, directory, name })
+  },
+  /** Remote server management (files, monitoring, security, services, docker). */
+  ops: {
+    connect: (server: Server): Promise<Result<RemoteHostInfo>> =>
+      ipcRenderer.invoke('ops:connect', { server }),
+    disconnect: (serverId: string): Promise<Result> =>
+      ipcRenderer.invoke('ops:disconnect', { serverId }),
+    exec: (server: Server, command: string, root?: boolean): Promise<Result<RemoteExec>> =>
+      ipcRenderer.invoke('ops:exec', { server, command, root }),
+
+    fs: {
+      home: (server: Server): Promise<Result<string>> => ipcRenderer.invoke('ops:fs:home', { server }),
+      list: (server: Server, path: string): Promise<Result<RemoteListing>> =>
+        ipcRenderer.invoke('ops:fs:list', { server, path }),
+      read: (server: Server, path: string): Promise<Result<RemoteFile>> =>
+        ipcRenderer.invoke('ops:fs:read', { server, path }),
+      readBinary: (server: Server, path: string): Promise<Result<RemoteBinary>> =>
+        ipcRenderer.invoke('ops:fs:readBinary', { server, path }),
+      write: (server: Server, path: string, content: string): Promise<Result<null>> =>
+        ipcRenderer.invoke('ops:fs:write', { server, path, content }),
+      mkdir: (server: Server, path: string): Promise<Result<null>> =>
+        ipcRenderer.invoke('ops:fs:mkdir', { server, path }),
+      newFile: (server: Server, path: string): Promise<Result<null>> =>
+        ipcRenderer.invoke('ops:fs:newFile', { server, path }),
+      rename: (server: Server, from: string, to: string): Promise<Result<null>> =>
+        ipcRenderer.invoke('ops:fs:rename', { server, from, to }),
+      delete: (server: Server, paths: string[]): Promise<Result<null>> =>
+        ipcRenderer.invoke('ops:fs:delete', { server, paths }),
+      chmod: (
+        server: Server,
+        path: string,
+        mode: string,
+        recursive?: boolean
+      ): Promise<Result<null>> =>
+        ipcRenderer.invoke('ops:fs:chmod', { server, path, mode, recursive }),
+      chown: (
+        server: Server,
+        path: string,
+        owner: string,
+        recursive?: boolean
+      ): Promise<Result<null>> =>
+        ipcRenderer.invoke('ops:fs:chown', { server, path, owner, recursive }),
+      transfer: (
+        server: Server,
+        op: 'copy' | 'move',
+        sources: string[],
+        destDir: string
+      ): Promise<Result<null>> =>
+        ipcRenderer.invoke('ops:fs:transfer', { server, op, sources, destDir }),
+      archive: (
+        server: Server,
+        paths: string[],
+        destDir: string,
+        name: string
+      ): Promise<Result<string>> =>
+        ipcRenderer.invoke('ops:fs:archive', { server, paths, destDir, name }),
+      extract: (server: Server, path: string, destDir: string): Promise<Result<null>> =>
+        ipcRenderer.invoke('ops:fs:extract', { server, path, destDir }),
+      size: (server: Server, path: string): Promise<Result<string>> =>
+        ipcRenderer.invoke('ops:fs:size', { server, path }),
+      tail: (server: Server, path: string, lines?: number): Promise<Result<string>> =>
+        ipcRenderer.invoke('ops:fs:tail', { server, path, lines }),
+      upload: (server: Server, remoteDir: string, localPaths?: string[]): Promise<Result<number>> =>
+        ipcRenderer.invoke('ops:fs:upload', { server, remoteDir, localPaths }),
+      download: (server: Server, path: string, isDir: boolean): Promise<Result<string | null>> =>
+        ipcRenderer.invoke('ops:fs:download', { server, path, isDir })
+    },
+
+    metrics: (server: Server): Promise<Result<RemoteMetrics>> =>
+      ipcRenderer.invoke('ops:metrics', { server }),
+    kill: (server: Server, pid: number, signal?: 'TERM' | 'KILL'): Promise<Result<null>> =>
+      ipcRenderer.invoke('ops:kill', { server, pid, signal }),
+
+    security: (server: Server): Promise<Result<SecurityReport>> =>
+      ipcRenderer.invoke('ops:security', { server }),
+    updates: (server: Server): Promise<Result<UpdateReport>> =>
+      ipcRenderer.invoke('ops:updates', { server }),
+    ufw: (server: Server, args: string): Promise<Result<string>> =>
+      ipcRenderer.invoke('ops:ufw', { server, args }),
+    fail2banUnban: (server: Server, jail: string, ip: string): Promise<Result<string>> =>
+      ipcRenderer.invoke('ops:fail2banUnban', { server, jail, ip }),
+
+    services: (server: Server): Promise<Result<ServiceUnit[]>> =>
+      ipcRenderer.invoke('ops:services', { server }),
+    serviceAction: (server: Server, unit: string, action: string): Promise<Result<string>> =>
+      ipcRenderer.invoke('ops:serviceAction', { server, unit, action }),
+    serviceLogs: (server: Server, unit: string, lines?: number): Promise<Result<string>> =>
+      ipcRenderer.invoke('ops:serviceLogs', { server, unit, lines }),
+
+    docker: (server: Server): Promise<Result<DockerReport>> =>
+      ipcRenderer.invoke('ops:docker', { server }),
+    dockerAction: (server: Server, action: string, id: string): Promise<Result<string>> =>
+      ipcRenderer.invoke('ops:dockerAction', { server, action, id }),
+    dockerLogs: (server: Server, id: string, lines?: number): Promise<Result<string>> =>
+      ipcRenderer.invoke('ops:dockerLogs', { server, id, lines }),
+    dockerPrune: (
+      server: Server,
+      target: 'images' | 'containers' | 'system'
+    ): Promise<Result<string>> => ipcRenderer.invoke('ops:dockerPrune', { server, target }),
+
+    onProgress: (cb: (p: TransferProgress) => void): (() => void) => {
+      const listener = (_e: unknown, p: TransferProgress): void => cb(p)
+      ipcRenderer.on('ops:progress', listener)
+      return () => ipcRenderer.removeListener('ops:progress', listener)
+    },
+    onClosed: (cb: (p: { serverId: string }) => void): (() => void) => {
+      const listener = (_e: unknown, p: { serverId: string }): void => cb(p)
+      ipcRenderer.on('ops:closed', listener)
+      return () => ipcRenderer.removeListener('ops:closed', listener)
+    },
+    /** Local absolute path of a file dropped onto the window (Electron 32+). */
+    pathForFile: (file: File): string => webUtils.getPathForFile(file)
   },
   app: {
     saveFile: (defaultName: string, content: string): Promise<Result<string>> =>
