@@ -8,7 +8,8 @@ import {
   RotateCw,
   ServerCog,
   Shield,
-  Unplug
+  Unplug,
+  X
 } from 'lucide-react'
 import type { Project, RemoteHostInfo, Server } from '@shared/types'
 import { useOpenRequest } from '../../store'
@@ -91,9 +92,22 @@ export default function OpsPanel({
     const gone = opened.filter((id) => !ids.has(id))
     if (gone.length) {
       for (const id of gone) void window.api.ops.disconnect(id)
-      setOpened((prev) => prev.filter((id) => ids.has(id)))
+      setOpened((prev) => {
+        const next = prev.filter((id) => ids.has(id))
+        setSelectedId((cur) => (cur && !ids.has(cur) ? (next[next.length - 1] ?? null) : cur))
+        return next
+      })
+      setTabs((t) => {
+        const next = { ...t }
+        for (const id of gone) delete next[id]
+        return next
+      })
+      setConns((c) => {
+        const next = { ...c }
+        for (const id of gone) delete next[id]
+        return next
+      })
     }
-    setSelectedId((cur) => (cur && !ids.has(cur) ? null : cur))
   }, [project.servers, opened])
 
   const select = (server: Server): void => {
@@ -106,6 +120,20 @@ export default function OpsPanel({
   const disconnect = (server: Server): void => {
     void window.api.ops.disconnect(server.id)
     setConns((c) => ({ ...c, [server.id]: { status: 'idle' } }))
+  }
+
+  const closeSession = (serverId: string): void => {
+    void window.api.ops.disconnect(serverId)
+    setConns((c) => ({ ...c, [serverId]: { status: 'idle' } }))
+    setOpened((prev) => {
+      const next = prev.filter((id) => id !== serverId)
+      setSelectedId((cur) => (cur === serverId ? (next[next.length - 1] ?? null) : cur))
+      return next
+    })
+    setTabs((t) => {
+      const { [serverId]: _, ...rest } = t
+      return rest
+    })
   }
 
   // Command palette: select (and connect) the requested server.
@@ -166,7 +194,7 @@ export default function OpsPanel({
       <ResizeHandle axis="x" size={railW} onResize={setRailW} />
 
       <div className="flex min-w-0 flex-1 flex-col bg-bg-base">
-        {!selected ? (
+        {opened.length === 0 || !selected ? (
           <EmptyState
             icon={<ServerCog size={42} />}
             title="Pick a server"
@@ -174,6 +202,59 @@ export default function OpsPanel({
           />
         ) : (
           <>
+            <div className="flex items-stretch border-b border-line bg-bg-panel">
+              <div className="flex min-w-0 flex-1 overflow-x-auto">
+                {opened.map((id) => {
+                  const server = project.servers.find((s) => s.id === id)
+                  if (!server) return null
+                  const state = conns[id]?.status ?? 'idle'
+                  const isActive = id === selectedId
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => setSelectedId(id)}
+                      className={cn(
+                        'group flex shrink-0 items-center gap-2 border-r border-t-2 border-line px-3.5 py-2 text-[13px]',
+                        isActive
+                          ? 'border-t-accent bg-bg-base text-ink'
+                          : 'border-t-transparent text-ink-soft hover:bg-bg-hover'
+                      )}
+                    >
+                      <ServerCog
+                        size={13}
+                        style={server.color ? { color: server.color } : undefined}
+                      />
+                      <span
+                        className="max-w-[140px] truncate rounded px-1.5 py-0.5"
+                        style={
+                          server.color
+                            ? {
+                                backgroundColor: colorTint(
+                                  server.color,
+                                  isActive ? 0.22 : 0.14
+                                )
+                              }
+                            : undefined
+                        }
+                      >
+                        {server.name}
+                      </span>
+                      {state !== 'idle' && <StatusDot color={STATUS_COLOR[state]} />}
+                      <span
+                        className="rounded p-0.5 opacity-0 hover:bg-bg-hover hover:text-bad group-hover:opacity-100"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          closeSession(id)
+                        }}
+                      >
+                        <X size={12} />
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
             <div className="flex items-center gap-2 border-b border-line bg-bg-panel px-3 py-1.5">
               <StatusDot color={STATUS_COLOR[conn?.status ?? 'idle']} />
               <span className="truncate text-xs text-ink-soft">
