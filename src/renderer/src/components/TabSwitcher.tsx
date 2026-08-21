@@ -56,7 +56,7 @@ export function nextIndex(
  * of the places — the first Tab should then land on the newest one, not skip it.
  */
 function buildPlaces(): { places: Place[]; hasCurrent: boolean } {
-  const { data, mru, selectedProjectId, activeTab, liveSsh, liveDb } = useApp.getState()
+  const { data, mru, selectedProjectId, activeTab, liveSsh, liveDb, liveOps } = useApp.getState()
   const byId = new Map(data.projects.map((p) => [p.id, p]))
 
   const keys = [...mru]
@@ -85,7 +85,7 @@ function buildPlaces(): { places: Place[]; hasCurrent: boolean } {
       tab: parsed.tab,
       projectName: project.name,
       icon: project.icon,
-      live: projectHasLive(liveSsh, liveDb, project.id)
+      live: projectHasLive(liveSsh, liveDb, liveOps, project.id)
     })
   }
   return { places, hasCurrent }

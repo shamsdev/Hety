@@ -12,7 +12,7 @@ import {
   X
 } from 'lucide-react'
 import type { Project, RemoteHostInfo, Server } from '@shared/types'
-import { useOpenRequest } from '../../store'
+import { useApp, useOpenRequest } from '../../store'
 import { cn, EmptyState, StatusDot, colorTint } from '../../lib/ui'
 import { ResizeHandle, usePersistedSize } from '../../lib/resize'
 import { ToolButton } from './common'
@@ -58,10 +58,33 @@ export default function OpsPanel({
   const [conns, setConns] = useState<Record<string, Conn>>({})
   const [tabs, setTabs] = useState<Record<string, SubTab>>({})
   const [railW, setRailW] = usePersistedSize('ops.rail', 216, 160, 420)
+  const setLive = useApp((s) => s.setLive)
 
   const selected = project.servers.find((s) => s.id === selectedId) ?? null
   const conn = selectedId ? conns[selectedId] : undefined
   const subTab: SubTab = (selectedId && tabs[selectedId]) || 'files'
+
+  // Keep workspace / sidebar green dots in sync with connected remote sessions.
+  useEffect(() => {
+    const tracked = useApp.getState().liveOps[project.id] ?? []
+    for (const key of tracked) {
+      if (!opened.includes(key) || conns[key]?.status !== 'connected') {
+        setLive('ops', project.id, key, false)
+      }
+    }
+    for (const id of opened) {
+      setLive('ops', project.id, id, conns[id]?.status === 'connected')
+    }
+  }, [opened, conns, project.id, setLive])
+
+  useEffect(() => {
+    return () => {
+      const keys = useApp.getState().liveOps[project.id] ?? []
+      for (const key of keys) {
+        useApp.getState().setLive('ops', project.id, key, false)
+      }
+    }
+  }, [project.id])
 
   const connect = useCallback((server: Server) => {
     setConns((c) => ({ ...c, [server.id]: { status: 'connecting' } }))
