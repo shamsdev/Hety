@@ -168,7 +168,10 @@ export default function OpsPanel({
             return (
               <button
                 key={s.id}
-                onClick={() => select(s)}
+                onClick={() => {
+                  if (opened.includes(s.id)) setSelectedId(s.id)
+                }}
+                onDoubleClick={() => select(s)}
                 className={cn(
                   'mb-1 block w-full rounded-lg px-2.5 py-2 text-left transition-colors',
                   active ? 'bg-accent-dim' : 'hover:bg-bg-hover'
@@ -198,7 +201,7 @@ export default function OpsPanel({
           <EmptyState
             icon={<ServerCog size={42} />}
             title="Pick a server"
-            subtitle="Choose a server on the left to browse its files, watch its load, and manage its firewall."
+            subtitle="Double-click a server on the left to browse its files, watch its load, and manage its firewall."
           />
         ) : (
           <>

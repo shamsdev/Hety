@@ -292,7 +292,10 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
               >
                 <button
                   className="flex w-full min-w-0 items-center gap-2 pr-7 text-left"
-                  onClick={() => select(d)}
+                  onClick={() => {
+                    if (opened.includes(d.id)) setSelectedDbId(d.id)
+                  }}
+                  onDoubleClick={() => select(d)}
                 >
                   <span className="relative shrink-0">
                     <DatabaseLogo kind={d.kind} size={19} />
@@ -488,7 +491,7 @@ export default function DbPanel({ project }: { project: Project }): ReactNode {
           <EmptyState
             icon={<DbIcon size={42} />}
             title="Select a database"
-            subtitle="Pick a connection on the left, or add a new one. You can test supported connections before saving."
+            subtitle="Double-click a connection on the left to open it, or add a new one."
           />
         ) : (
           <>

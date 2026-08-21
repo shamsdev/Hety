@@ -181,7 +181,7 @@ export default function SshPanel({
           <EmptyState
             icon={<TerminalIcon size={42} />}
             title="No active sessions"
-            subtitle="Double-click a server or press its ▶ button to open a terminal."
+            subtitle="Double-click a server to open a terminal."
           />
         ) : (
           <>
