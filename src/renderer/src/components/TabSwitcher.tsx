@@ -13,8 +13,8 @@ import { cn, ProjectIcon, StatusDot } from '../lib/ui'
 const TAB_META: Record<WorkspaceTab, { label: string; icon: ReactNode }> = {
   ssh: { label: 'SSH', icon: <Terminal size={13} /> },
   ops: { label: 'Remote', icon: <ServerCog size={13} /> },
-  repo: { label: 'Repository', icon: <GitBranch size={13} /> },
   db: { label: 'Database', icon: <DbIcon size={13} /> },
+  repo: { label: 'Repository', icon: <GitBranch size={13} /> },
   board: { label: 'Planning', icon: <Columns3 size={13} /> }
 }
 

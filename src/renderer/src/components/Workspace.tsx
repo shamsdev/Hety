@@ -136,11 +136,11 @@ export default function Workspace({
         <div className={cn('h-full', tab === 'ops' ? 'block' : 'hidden')}>
           <OpsPanel project={project} visible={visible && tab === 'ops'} />
         </div>
-        <div className={cn('h-full', tab === 'repo' ? 'block' : 'hidden')}>
-          <RepoPanel project={project} />
-        </div>
         <div className={cn('h-full', tab === 'db' ? 'block' : 'hidden')}>
           <DbPanel project={project} />
+        </div>
+        <div className={cn('h-full', tab === 'repo' ? 'block' : 'hidden')}>
+          <RepoPanel project={project} />
         </div>
         <div className={cn('h-full', tab === 'board' ? 'block' : 'hidden')}>
           <BoardPanel project={project} />
